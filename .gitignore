@@ -3,3 +3,7 @@ __pycache__/
 .update.lock
 node_modules/
 *-backup-*.json
+
+*.sqlite3
+*.sqlite3-*
+setup-token

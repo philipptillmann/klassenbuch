@@ -23,7 +23,10 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$ROOT_DIR
-ExecStart=$(command -v python3) $ROOT_DIR/server.py --bind 0.0.0.0 --port 8085
+ExecStart=$(command -v python3) $ROOT_DIR/server.py --bind 0.0.0.0 --port 8085 --data-dir /var/lib/klassenbuch
+StateDirectory=klassenbuch
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/klassenbuch
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -50,4 +53,7 @@ for attempt in range(30):
 else: raise SystemExit('Dienst nicht erreichbar. Prüfen: sudo journalctl -u klassenbuch -n 50')
 PY
 as_root systemctl is-active --quiet klassenbuch.service
-echo 'Klassenbuch ist bereit: http://meinservername:8085 (Servername/DNS und Firewall prüfen).'
+echo 'Klassenbuch ist bereit. Über die HTTPS-Adresse deines Reverse-Proxys öffnen.'
+if [[ -f /var/lib/klassenbuch/setup-token ]] || as_root test -f /var/lib/klassenbuch/setup-token; then
+  echo 'Einmaliger Einrichtungsschlüssel: sudo cat /var/lib/klassenbuch/setup-token'
+fi

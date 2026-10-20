@@ -1,67 +1,92 @@
 # Klassenbuch
 
-Lehrer-App für Klassen und Kurse, Schülerlisten, Wochenstundenplan und schnelle Mitarbeitserfassung per Karte. Der Branch **Server** enthält die installierbare Version.
+Lehrer-App für Klassen, Kurse, Schülerlisten, Stundenplan, Mitarbeit, Schulnoten und Fehlzeiten. Der Branch **Server** enthält die installierbare Version.
 
-## Installation auf dem eigenen Server
+## Installation und Update
 
-Voraussetzungen: Linux mit systemd, Python 3 (ab 3.9), Git, Bash, `flock` (util-linux) sowie sudo-Rechte oder root. Keine Node-Installation und kein Docker erforderlich. Der Port 8085 muss frei sein. Ein vorhandener Dienst gleichen Namens wird durch die Installation aktualisiert.
+Voraussetzungen: Linux mit systemd, Python ab 3.9, Git, Bash, `flock` (util-linux), sudo-Rechte oder root. Node und Docker sind für den Betrieb nicht erforderlich. Port 8085 muss frei sein.
 
 ```bash
 git clone --branch Server --single-branch https://github.com/philipptillmann/klassenbuch.git ~/klassenbuch
 bash ~/klassenbuch/install.sh
+
+# Bestehende Installation aktualisieren:
+~/klassenbuch/update.sh
 ```
 
-Danach im Browser **http://meinservername:8085** öffnen. `meinservername` muss auf die IP des eigenen Servers zeigen; alternativ dessen IP verwenden. Falls eine Firewall aktiv ist, TCP-Port 8085 für die gewünschten Clients freigeben. Die Installation ändert weder DNS noch Firewall.
+Der Installer richtet `klassenbuch.service` ein und aktiviert den Start beim Booten. Der Dienst läuft als der Benutzer, der `install.sh` aufgerufen hat. Code bleibt nur lesbar; `/var/lib/klassenbuch` ist das schreibbare, dauerhafte Datenverzeichnis und liegt außerhalb des Git-Checkouts. Updates löschen oder ersetzen es nicht. Ein bestehender Dienst gleichen Namens wird aktualisiert.
 
-Das Installationsskript richtet `/etc/systemd/system/klassenbuch.service` ein, startet den Dienst und aktiviert den Start beim Booten. Der Prozess läuft als der Benutzer, der `install.sh` aufgerufen hat. Dateien unter dessen Heimatverzeichnis bleiben für den Dienst nur lesbar.
+Das Backend lauscht weiterhin auf Port 8085. **Die App über die HTTPS-Adresse des bestehenden Reverse-Proxys öffnen.** Außer auf localhost blockiert der Browser einen Serverzugriff über unverschlüsseltes HTTP. Der Proxy muss die gesamte App einschließlich `/api/` weiterleiten, die Header `Host` (mit Port, falls nötig), `Authorization`, `If-Match` und `X-Setup-Token` erhalten und darf API-Antworten nicht cachen. Für große Backups das Proxy-Uploadlimit auf mindestens 20 MiB setzen, z. B. `client_max_body_size 20m` bei nginx. Port 8085 sollte nur für den Proxy erreichbar sein. Der Installer ändert weder HTTPS, DNS noch Firewall.
+
+### Einmalige Einrichtung
+
+Vor dem ersten Speichern wird zusätzlich zum Passwort ein Einrichtungsschlüssel benötigt. Dadurch kann ein zufälliger Besucher nicht das noch leere Klassenbuch übernehmen.
 
 ```bash
-# Aktualisieren (bei Bedarf sudo-Passwort für Dienstinstallation/-neustart):
-~/klassenbuch/update.sh
+sudo cat /var/lib/klassenbuch/setup-token
+```
 
-# Status und Protokoll:
+Den Schlüssel auf der HTTPS-Einrichtungsseite eintragen. Danach entweder ein neues Passwort mit mindestens zwölf Zeichen festlegen oder ein vorhandenes Klassenbuch übernehmen. Der Einrichtungsschlüssel wird nach erfolgreicher Einrichtung entfernt. Weitere Geräte benötigen nur das Passwort. Es gibt ein gemeinsames Klassenbuch pro Serverinstallation, keine getrennten Benutzerkonten.
+
+### Vorhandene Browserdaten übernehmen
+
+Nach dem Update alle bereits geöffneten App-Tabs neu laden. Alte Tabs können noch die bisherige Version mit lokalem Speicher ausführen.
+
+- **Gleiche Adresse wie zuvor:** Die App erkennt den bisherigen Eintrag `stundenbuch.v1`. Einrichtungsschlüssel und bisheriges Passwort eingeben. Die verschlüsselten Daten werden unverändert übertragen, zurückgelesen und erst nach erfolgreicher Prüfung aus diesem Browser entfernt. Vorher kann eine verschlüsselte lokale Sicherung heruntergeladen werden.
+- **Neue Adresse, HTTP → HTTPS oder anderer Port:** Browser isolieren ihren lokalen Speicher nach Adresse. Auf der bisherigen Adresse „Bisherige Browserdaten als Backup sichern“ verwenden; das geht auch auf der jetzt gesperrten HTTP-Seite ohne Passworteingabe. Auf der HTTPS-Adresse Einrichtungsschlüssel eintragen und „Verschlüsseltes Backup importieren“ wählen. Das Passwort des Backups wird zum Passwort des neuen Server-Klassenbuchs. Wenn die alte Adresse nicht mehr erreichbar ist, muss sie kurz bereitgestellt werden oder ein bereits exportiertes Backup verwendet werden.
+- **Server bereits eingerichtet:** Erst das Server-Klassenbuch entsperren. Unter „Datenschutz“ ein Backup importieren. Der Import ersetzt nach Bestätigung den gesamten Datenbestand; er führt keinen automatischen Merge aus. Das bestehende Serverpasswort bleibt erhalten. Eventuell noch vorhandene lokale Altdaten lassen sich dort als Backup sichern.
+
+Altdaten auf einer anderen Adresse werden nicht automatisch gelöscht. Nach erfolgreicher Kontrolle des Serverbestands können sie dort manuell entfernt werden. Neue Änderungen werden ausschließlich auf dem Server gespeichert, nicht im lokalen Speicher oder Session-Speicher des Browsers.
+
+### Betrieb
+
+```bash
 sudo systemctl status klassenbuch
 sudo journalctl -u klassenbuch -n 50
-
-# Stoppen:
 sudo systemctl stop klassenbuch
 ```
 
-`update.sh` lädt ausschließlich Branch `Server` von `origin`, akzeptiert nur Fast-Forward-Updates, blockiert parallele Updates und bricht bei lokalen Änderungen an versionierten Dateien ab. Anschließend laufen Prüfungen und der Dienst wird neu gestartet. Ein Git-Fehler lässt den Updatevorgang abbrechen; es gibt keinen automatischen Reset und keinen automatischen Rollback. Browserdaten werden durch Serverupdates nicht angefasst.
-
-Alternativ ohne systemd im Vordergrund starten:
+Ohne systemd im Vordergrund:
 
 ```bash
-cd ~/klassenbuch
-python3 server.py --bind 0.0.0.0 --port 8085
+python3 server.py --bind 127.0.0.1 --port 8085 --data-dir /pfad/zum/klassenbuch-speicher
 ```
+
+Ohne `--data-dir` verwendet der manuelle Start `KLASSENBUCH_DATA_DIR`, andernfalls `~/.local/share/klassenbuch`. Dort liegt auch der einmalige `setup-token`. Die UI nennt standardmäßig den systemd-Pfad. Der Datenpfad muss dauerhaft beschreibbar sein.
+
+`update.sh` holt ausschließlich Fast-Forward-Änderungen von `origin/Server`, blockiert parallele Updates und bricht bei lokalen Änderungen an versionierten Dateien ab. Danach laufen Prüfungen und ein Dienstneustart. Kein automatischer Reset oder Rollback. Die systemd-Installation erfolgt auf dem Zielserver und wurde in der Entwicklungsumgebung ohne systemd nicht ausgeführt.
+
+## Daten und Verschlüsselung
+
+**Der Server speichert nur den verschlüsselten Datenbestand in `/var/lib/klassenbuch/vault.sqlite3`.** Klassen, Namen, Kommentare, Fehlzeiten und Noten werden vor dem Upload im Browser gemeinsam per AES-256-GCM verschlüsselt. Passwort und Entschlüsselungsschlüssel verlassen den Browser nicht und werden dort nur im Arbeitsspeicher gehalten. Nach fünf Minuten ohne Eingabe sperrt sich die App.
+
+Das portable Datenformat bleibt `v:1` mit Salt, IV und Ciphertext. Schlüsselableitung: PBKDF2-HMAC-SHA-256 mit 600.000 Iterationen und zufälligem 16-Byte-Salt. Jede Speicherung verwendet einen neuen zufälligen 12-Byte-IV und einen 128-Bit-Authentifizierungstag. Zufallswerte kommen aus `crypto.getRandomValues`. Alte Backups bleiben lesbar.
+
+Für den Serverzugriff wird separat ein 256-Bit-Zugriffstoken aus dem Passwort abgeleitet: PBKDF2-HMAC-SHA-256, ebenfalls 600.000 Iterationen, aber mit dem getrennten Salt `UTF8("klassenbuch-server-auth-v1:") || Salt`. Dieser Token kann die Daten nicht entschlüsseln. Er wird ausschließlich über HTTPS übertragen, nur im Browser-RAM gehalten und serverseitig nur als SHA-256-Prüfwert gespeichert. Salt und Versionsinformationen sind vor dem Entsperren öffentlich; der verschlüsselte Datenbestand und Schreibzugriffe benötigen den Zugriffstoken. Es gibt keine persistierenden Anmelde-Cookies oder im Browser gespeicherte Schlüssel.
+
+Die SQLite-Datenbank liegt in einem Verzeichnis mit Modus 0700, die Datei hat Modus 0600. Datenbank und Einrichtungsschlüssel werden niemals als Web-Dateien ausgeliefert. SQLite-Transaktionen sichern Schreibvorgänge ab. Eine Revision schützt vor verloren gehenden Änderungen: Wer einen alten Stand geöffnet hat, erhält beim Speichern einen Konflikt und muss neu laden und erneut entsperren. Andere Geräte laden neue Änderungen beim Entsperren/Neuladen; es gibt keine Live-Zusammenarbeit. Bei Verbindungsfehlern wird ein Speichern als fehlgeschlagen gemeldet und die versuchte Änderung zurückgenommen. Es gibt keinen Offline-Browser-Fallback.
+
+Ohne Passwort gibt es keine Wiederherstellung. Ein kompromittierter Server könnte veränderten JavaScript-Code ausliefern; ein entsperrtes oder kompromittiertes Gerät kann die Daten lesen. Die Architektur schützt den gespeicherten Datenbestand, stellt aber keine unabhängige Sicherheitsprüfung dar.
+
+### Backups
+
+Unter **Datenschutz → Verschlüsseltes Backup** wird der aktuelle verschlüsselte Serverbestand als Datei exportiert. Die Datei benötigt das Passwort, aber keinen Zugriffstoken. Beim Import in ein bereits entsperrtes Server-Klassenbuch wird der Inhalt mit dessen bestehendem Schlüssel neu verschlüsselt; das Serverpasswort ändert sich nicht. Beim Import in eine leere Installation wird das Backup-Passwort zum Serverpasswort.
+
+Regelmäßig Backups exportieren und zusätzlich das Server-Datenverzeichnis sichern. Für eine konsistente Dateisicherung entweder den Dienst während der Kopie stoppen oder die SQLite-Backup-Funktion verwenden. Ein Systembackup muss Datenbank und gegebenenfalls noch vorhandenen Einrichtungsschlüssel enthalten. Niemals eine Datenbank ins Git-Repository legen.
 
 ## Funktionen
 
 - Klassen/Kurse mit Fach und Schülerlisten anlegen und bearbeiten.
 - Wochenstundenplan mit Wochentag, Uhrzeit und Raum.
-- Eine neue Stunde mit Datum und Thema anlegen und alle Schüler als Karten durchgehen.
-- Bewertungen: **++ = 2, + = 1, 0 = 0, − = −1, — = −2**. Optionaler Kommentar direkt auf jeder Schülerkarte; Zurückgehen und Überspringen möglich.
-- Gespeicherte Stunden samt Datum, Thema, Kommentaren und Bewertungen nachträglich bearbeiten, auch für einzelne Schüler. Im Stundenverlauf der Jahresbilanz stehen dafür „Stunde bearbeiten“ und „Bewertung bearbeiten“.
-- „Abwesend vermerken“ erfasst eine offene Fehlzeit; „Ohne Eintrag überspringen“ erfasst keine Abwesenheit. Unter **Fehlzeiten** werden alle Kinder und Kurse angezeigt, offene Entschuldigungen zuerst nach Kind gruppiert. Der Status lässt sich später auf entschuldigt, unentschuldigt oder wieder offen setzen. Jede gespeicherte Unterrichtseinheit zählt als eine Fehlstunde.
-- Unter **Noteneinträge** Tests/Klassenarbeiten und weitere Leistungen mit Titel, Datum, individuellen Schulnoten (ganze Zahlen 1–6) und optionalen Kommentaren erfassen. Die Einträge und einzelne Schülernoten sind nachträglich bearbeitbar.
-- Vorläufige Noten sowie Halbjahresnoten für das erste oder zweite Halbjahr werden in **Noteneinträge** und **Jahresbilanz** in einem eigenen hervorgehobenen Bereich angezeigt.
-- Jahresbilanz mit Häufigkeiten, arithmetischem Punkteschnitt, Fehlstunden und Stundenverlauf einschließlich Kommentaren. Abwesende und übersprungene Schüler zählen nicht zum Mitarbeitsschnitt. Schulnoten aus Tests/weiteren Leistungen haben einen separaten ungewichteten Durchschnitt; vorläufige und Halbjahresnoten fließen in keinen Durchschnitt ein. Es wird keine automatische Gesamtnote berechnet.
-- Passwortsperre, automatische Sperre nach fünf Minuten ohne Eingabe, verschlüsselte Backups.
+- Unterrichtsstunden mit Datum und Thema erfassen und Schüler als Karten durchgehen.
+- Mitarbeit **++ = 2, + = 1, 0 = 0, − = −1, — = −2**, optionale Kommentare, Zurückgehen und Überspringen.
+- Ganze Stunden und einzelne Bewertungen/Kommentare nachträglich bearbeiten.
+- Abwesenheit getrennt vom Überspringen erfassen; Fehlzeiten nach Kind gruppiert mit offenen, entschuldigten und unentschuldigten Einträgen. Eine Unterrichtseinheit zählt als eine Fehlstunde.
+- Tests/Klassenarbeiten und weitere Leistungen mit Schulnoten 1–6 und optionalen Kommentaren.
+- Vorläufige Noten und Halbjahresnoten beider Halbjahre separat hervorheben.
+- Jahresbilanz: Mitarbeitsschnitt und Schulnotenschnitt getrennt; Abwesenheiten und Überspringen zählen nicht zur Mitarbeit, Bilanznoten nicht zu den Schnitten. Keine automatische Gesamtnote.
 
-Vorhandene Daten und alte Backups werden beim Entsperren kompatibel ergänzt. Früher übersprungene Karten werden **nicht** als Fehlzeiten nachgetragen, da der bisherige Prototyp Abwesenheit und Überspringen nicht getrennt hat. Historische Bewertungen und Fehlzeiten bleiben auch nach dem Entfernen eines Schülers aus der aktuellen Kursliste bearbeitbar.
-
-Ein Datenbestand enthält ein Schuljahr. Eine Änderung der Schuljahrbezeichnung filtert oder archiviert keine Daten. Für ein neues Schuljahr zuerst ein Backup sichern und einen getrennten Browserbereich verwenden.
-
-## Daten und Verschlüsselung
-
-**Die Daten liegen verschlüsselt im Browser, nicht auf dem Server.** Es gibt keine Konten, Serverdatenbank oder automatische Synchronisierung. Ein anderer Browser, ein anderes Gerät oder eine andere URL/Port/Protokoll-Kombination hat einen eigenen Speicher. Für einen Umzug zuerst das Backup unter „Datenschutz“ exportieren und am neuen Ort importieren. Alte Stundenbuch-Backups bleiben kompatibel; der interne Speicherschlüssel `stundenbuch.v1` bleibt erhalten.
-
-Beim ersten Start ein Passwort mit mindestens zwölf Zeichen festlegen. Alle Fachdaten einschließlich Kommentare, Fehlzeiten, Schulnoten und Bilanznoten werden gemeinsam mit AES-256-GCM und 128-Bit-Authentifizierungstag verschlüsselt. Schlüsselableitung: PBKDF2-HMAC-SHA-256, 600.000 Iterationen, zufälliges 16-Byte-Salt. Jede Speicherung verwendet einen neuen zufälligen 12-Byte-IV. Zufallswerte kommen ausschließlich aus `crypto.getRandomValues`. Passwort und Schlüssel werden nicht dauerhaft gespeichert. Ohne Passwort gibt es keine Wiederherstellung. Browserdaten löschen bedeutet ohne Backup Datenverlust. Noch nicht gespeicherte Kartenbewertungen liegen nur im Arbeitsspeicher.
-
-Unter HTTPS/localhost wird native Web Crypto verwendet. Auf der gewünschten HTTP-LAN-Adresse wird dieselbe Kryptografie durch die lokal mitgelieferte SJCL-Bibliothek umgesetzt. Die langsamere Passwortableitung läuft in einem Worker. Es gibt keine CDN-, Schrift- oder sonstigen externen Laufzeitabfragen.
-
-**HTTP schützt die Übertragung der App nicht.** Die gespeicherten Daten sind verschlüsselt, ein aktiver Angreifer im Netzwerk könnte aber den ausgelieferten JavaScript-Code verändern und das eingegebene Passwort abgreifen. Für echte Schülerdaten HTTPS über einen vertrauenswürdigen Reverse Proxy vorsehen. Ein entsperrter Browser und ein kompromittiertes Gerät können die Daten anzeigen. Keine unabhängige Sicherheitsprüfung.
+Ein Datenbestand enthält ein Schuljahr. Die Schuljahrbezeichnung archiviert oder filtert keine Daten. Ein anderer Browser öffnet dasselbe Server-Klassenbuch. Frühere übersprungene Karten werden nicht automatisch zu Fehlzeiten. Historische Einträge entfernter Schüler bleiben bearbeitbar.
 
 ## Prüfungen
 
@@ -74,27 +99,24 @@ python3 -m unittest discover -s tests
 bash -n install.sh update.sh
 ```
 
-Geprüft werden verschlüsselte Speicherung, Ablehnung falscher Passwörter und manipulierter Daten, Formatkompatibilität zwischen HTTP-Fallback und Web Crypto, neue IVs und Schnittberechnung. HTTP-Integrationstests prüfen Assets, Sicherheitsheader, Healthcheck und den Ausschluss von Repository-/Backup-Dateien. Das Installationsskript führt Python-Tests und, wenn Node vorhanden ist, die Kryptografietests aus.
+Geprüft: Kryptografie, native/Fallback-Kompatibilität und getrennte Authentifizierungsableitung, fachliche Datenoperationen, API-Zugriffsschutz, Einrichtung, Revisionen, Verzeichnisrechte und Persistenz nach Neustart. Der Installer führt Python-Tests und, falls Node verfügbar ist, die JS-Tests aus.
 
-Die systemd-Installation muss auf dem Zielserver erfolgen. Sie wurde in der Entwicklungsumgebung ohne systemd nicht ausgeführt. Die Feedback-Funktionen wurden in Chromium durchgängig auf Desktop und in mobiler Ansicht geprüft, zusätzlich mit erzwungenem HTTP-Kryptografiefallback. Dabei wurden auch Verschlüsselung nach Neuladen und das Öffnen alter Daten getestet.
-
-Optionaler Browser-Regressionstest mit synthetischen Daten in einem getrennten Browserkontext (benötigt Playwright und Chromium, nicht für den Serverbetrieb nötig):
+Optionale Browser-Durchläufe benötigen Playwright und Chromium (nicht für den Betrieb nötig). Sie starten selbst isolierte Testserver mit temporären Datenverzeichnissen:
 
 ```bash
-# In einem Terminal:
-python3 server.py --bind 127.0.0.1 --port 8765
-
-# In einem anderen Terminal, wenn Playwright und Chromium vorhanden sind:
 node tests/browser.cjs
 HTTP_FALLBACK=1 MOBILE=1 node tests/browser.cjs
+node tests/storage-browser.cjs
+HTTP_FALLBACK=1 MOBILE=1 node tests/storage-browser.cjs
+TEST_HTTPS=1 node tests/storage-browser.cjs
 ```
 
-Über `TEST_URL`, `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` können URL, Chromium-Datei und das Playwright-Modul angepasst werden. Die zusätzlichen Modelltests prüfen Kommentaränderungen, individuelle Korrekturen, Anwesenheitswechsel, historische Schüler und die Trennung der Notenskalen.
+Der HTTPS-Test benötigt zusätzlich `openssl` und simuliert einen lokalen TLS-Reverse-Proxy. Geprüft werden Migration, ein unabhängiges zweites Gerät, falsche Passwörter, Schreibkonflikte, Netzwerkausfälle, Backups mit anderem Passwort und ausschließlich verschlüsselte Speicherung. `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` passen Chromium-Datei bzw. Playwright-Modul an.
 
 ## Feature Requests
 
-Jeder Feature Request erhält vor der Umsetzung ein GitHub-Issue. Nach Umsetzung, passenden Prüfungen und Push auf `Server` wird es mit Commit-Verweis geschlossen. Die Regeln stehen in `AGENTS.md`, eine Issue-Vorlage liegt unter `.github/ISSUE_TEMPLATE/`.
+Jeder Feature Request erhält vor der Umsetzung ein GitHub-Issue. Nach Umsetzung, passenden Prüfungen und Push auf `Server` wird es mit Commit-Verweis geschlossen. Regeln: `AGENTS.md`; Vorlage: `.github/ISSUE_TEMPLATE/`.
 
 ## Drittanbieter
 
-`dist/sjcl.js`: Stanford Javascript Crypto Library, Original aus https://github.com/bitwiseshiftleft/sjcl/blob/master/sjcl.js (Git-Blob `c3c3ea97712a5f252be850ebcb057fcadfbac2de`). Lizenz: `dist/SJCL-LICENSE.txt`. Unverändert lokal eingebunden; keine Verwendung der eingebauten passwortbasierten Schlüssel-Caches oder des SJCL-Zufallsgenerators.
+`dist/sjcl.js`: Stanford Javascript Crypto Library aus https://github.com/bitwiseshiftleft/sjcl/blob/master/sjcl.js (Blob `c3c3ea97712a5f252be850ebcb057fcadfbac2de`). Lizenz: `dist/SJCL-LICENSE.txt`. Lokal eingebunden; keine externen Laufzeitabfragen oder Nutzung der eingebauten Passwort-Caches/des SJCL-Zufallsgenerators. Native Web Crypto wird bevorzugt; der Fallback bleibt kompatibel.

@@ -9,10 +9,138 @@ async function derive(p,s){
 }
 async function encrypt(k,iv,plain){return Array.isArray(k)?bytes(sjcl.mode.gcm.encrypt(new sjcl.cipher.aes(k),bits(plain),bits(iv),[],128)):new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},k,plain))}
 async function decrypt(k,iv,cipher){return Array.isArray(k)?bytes(sjcl.mode.gcm.decrypt(new sjcl.cipher.aes(k),bits(cipher),bits(iv),[],128)):new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},k,cipher))}
-function save(){const snapshot=JSON.stringify(data),k=key,s=salt;let job=queue.then(async()=>{let iv=crypto.getRandomValues(new Uint8Array(12)),cipher=await encrypt(k,iv,new TextEncoder().encode(snapshot));localStorage.setItem(STORE,JSON.stringify({v:1,salt:b64(s),iv:b64(iv),cipher:b64(new Uint8Array(cipher))}));});queue=job.catch(()=>{});return job}
-function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';setTimeout(()=>$('#toast').style.display='none',3500)}
-function gate(){const exists=!!localStorage.getItem(STORE);$('#app').innerHTML=`<section class="lock panel">${location.protocol==='http:'&&!['localhost','127.0.0.1','[::1]'].includes(location.hostname)?'<p class="error">HTTP-Verbindung: Die gespeicherten Daten sind verschlüsselt, die App wird jedoch ungeschützt übertragen. Für sensible Daten HTTPS verwenden.</p>':''}<div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div><span class="eyebrow">Dein geschützter Arbeitsraum</span><h1>${exists?'Schön, dass du da bist.':'Mehr Zeit fürs Unterrichten.'}</h1><p>${exists?'Entsperre dein Klassenbuch mit deinem Passwort.':'Klassen organisieren. Mitarbeit festhalten. Entwicklung sehen. Alles an einem Ort.'}</p><form id="unlock"><label>Passwort ${exists?'':'festlegen'}</label><input id="password" type="password" autocomplete="${exists?'current-password':'new-password'}" minlength="12" required placeholder="Mindestens 12 Zeichen">${exists?'':'<label>Passwort wiederholen</label><input id="confirm" type="password" minlength="12" required autocomplete="new-password">'}<p id="error" class="error"></p><button class="primary">${exists?'Klassenbuch entsperren':'Geschütztes Klassenbuch anlegen'} →</button></form><small>♧ Lokal verschlüsselt mit AES-256-GCM. Das Passwort wird nicht gespeichert. Ohne Passwort können deine Daten nicht wiederhergestellt werden. Sichere regelmäßig ein verschlüsseltes Backup.</small><button id="restore">Verschlüsseltes Backup importieren</button></section>`;$('#unlock').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const p=$('#password').value;try{if(!exists&&p!==$('#confirm').value)throw Error('Die Passwörter stimmen nicht überein.');if(exists){let v=JSON.parse(localStorage.getItem(STORE));salt=un64(v.salt);key=await derive(p,salt);data=Records.normalize(JSON.parse(new TextDecoder().decode(await decrypt(key,un64(v.iv),un64(v.cipher)))))}else{salt=crypto.getRandomValues(new Uint8Array(16));key=await derive(p,salt);data={year:'2026/27',courses:[],slots:[],lessons:[],assessments:[]};await save()}$('#password').value='';resetTimer();render()}catch(err){key=null;data=null;$('#error').textContent=exists?'Entsperren fehlgeschlagen. Prüfe Passwort und Backup.':err.message}finally{busy=false}};$('#restore').onclick=importBackup}
-function resetTimer(){clearTimeout(timer);if(key)timer=setTimeout(lock,300000)}async function lock(){$('#modal').close();$('#modal').innerHTML='';await queue;key=null;data=null;session=null;clearTimeout(timer);gate()};['pointerdown','keydown'].forEach(e=>document.addEventListener(e,resetTimer));
+// Only ciphertext crosses the network. Password and decryption key stay in RAM.
+let serverState = { exists: false, revision: 0 }, authToken = null, setupToken = '', lastEnvelope = null;
+async function api(path, options = {}) {
+  let response;
+  try { response = await fetch(path, { ...options, cache: 'no-store', credentials: 'omit' }); }
+  catch { throw Error('Server nicht erreichbar. Änderung wurde nicht gespeichert.'); }
+  let value;
+  try { value = await response.json(); } catch { throw Error('Ungültige Serverantwort. Reverse-Proxy und Update prüfen.'); }
+  if (!response.ok) throw Error(value.error || `Serverfehler (${response.status})`);
+  return value;
+}
+async function deriveAuth(password, saltBytes) {
+  const domain = new TextEncoder().encode('klassenbuch-server-auth-v1:');
+  const authSalt = new Uint8Array(domain.length + saltBytes.length);
+  authSalt.set(domain); authSalt.set(saltBytes, domain.length);
+  if (!crypto.subtle) return b64(bytes(await derive(password, authSalt)));
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  return b64(new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt:authSalt,iterations:600000,hash:'SHA-256'}, material, 256)));
+}
+function headers() { return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }; }
+async function readVault() { return api('/api/vault', { headers: headers() }); }
+async function persist(envelope) {
+  const creating = !serverState.exists;
+  const result = await api('/api/vault', {
+    method: creating ? 'POST' : 'PUT',
+    headers: { ...headers(), ...(creating ? { 'X-Setup-Token': setupToken } : { 'If-Match': String(serverState.revision) }) },
+    body: JSON.stringify({ envelope }),
+  });
+  serverState = { exists: true, salt: envelope.salt, revision: result.revision };
+  lastEnvelope = envelope;
+  setupToken = '';
+}
+function save() {
+  const snapshot = JSON.stringify(data), k = key, s = salt;
+  const job = queue.then(async () => {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const cipher = await encrypt(k, iv, new TextEncoder().encode(snapshot));
+    await persist({ v: 1, salt: b64(s), iv: b64(iv), cipher: b64(cipher) });
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+function toast(text) {
+  $('#toast').textContent = text; $('#toast').style.display = 'block';
+  setTimeout(() => $('#toast').style.display = 'none', 5000);
+}
+function localLegacy() { try { return localStorage.getItem(STORE); } catch { return null; } }
+function downloadEnvelope(raw, name = 'klassenbuch-backup') {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([raw], {type:'application/json'}));
+  link.download = name + '-' + new Date().toISOString().slice(0,10) + '.json';
+  link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+async function openEnvelope(envelope, password) {
+  if (envelope.v !== 1 || !envelope.salt || !envelope.iv || !envelope.cipher) throw Error('Ungültiges Backup');
+  const newSalt = un64(envelope.salt), newKey = await derive(password, newSalt);
+  const contents = Records.normalize(JSON.parse(new TextDecoder().decode(await decrypt(newKey, un64(envelope.iv), un64(envelope.cipher)))));
+  return { key: newKey, salt: newSalt, contents };
+}
+async function gate() {
+  if (location.protocol !== 'https:' && !['localhost','127.0.0.1','[::1]'].includes(location.hostname)) {
+    $('#app').innerHTML = '<section class="lock panel"><h1>HTTPS erforderlich</h1><p class="error">HTTP-Verbindung: Bitte öffne Klassenbuch über deine HTTPS-Adresse. Der Serverzugriff ist hier zum Schutz deiner Zugangsdaten gesperrt.</p></section>';
+    if (localLegacy()) { const button = document.createElement('button'); button.textContent = 'Bisherige Browserdaten als Backup sichern'; button.onclick = () => downloadEnvelope(localLegacy(), 'klassenbuch-browser-backup'); $('#app section').append(button); }
+    return;
+  }
+  $('#app').innerHTML = '<section class="lock panel"><h1>Klassenbuch</h1><p>Verbindung zum geschützten Serverspeicher …</p></section>';
+  try { serverState = await api('/api/vault/status'); }
+  catch (error) {
+    $('#app').innerHTML = `<section class="lock panel"><h1>Server nicht erreichbar</h1><p class="error">${esc(error.message)}</p><button id="retry">Erneut versuchen</button></section>`;
+    $('#retry').onclick = gate; return;
+  }
+  const exists = serverState.exists, legacy = localLegacy(), migrating = !exists && !!legacy;
+  $('#app').innerHTML = `<section class="lock panel"><div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div><span class="eyebrow">Verschlüsselt auf deinem Server</span>
+    <h1>${exists ? 'Schön, dass du da bist.' : migrating ? 'Dein Klassenbuch zieht um.' : 'Klassenbuch einrichten.'}</h1>
+    <p>${exists ? 'Entsperre dein Klassenbuch mit deinem Passwort – auf jedem deiner Geräte.' : migrating ? 'Deine bisherigen Browserdaten werden nach dem Entsperren verschlüsselt auf den Server übertragen.' : 'Lege ein Passwort fest. Deine Daten werden im Browser verschlüsselt und auf deinem Server gespeichert.'}</p>
+    <form id="unlock">${!exists ? '<label for="setup">Einrichtungsschlüssel vom Server</label><input id="setup" type="password" required autocomplete="off"><small>Auf dem Server: sudo cat /var/lib/klassenbuch/setup-token</small>' : ''}
+    <label for="password">Passwort ${exists || migrating ? '' : 'festlegen'}</label><input id="password" type="password" autocomplete="${exists || migrating ? 'current-password' : 'new-password'}" minlength="12" required placeholder="Mindestens 12 Zeichen">
+    ${exists || migrating ? '' : '<label for="confirm">Passwort wiederholen</label><input id="confirm" type="password" minlength="12" required autocomplete="new-password">'}
+    <p id="error" class="error" role="alert"></p><button class="primary" type="submit">${exists ? 'Klassenbuch entsperren' : migrating ? 'Browserdaten auf Server übernehmen' : 'Geschütztes Klassenbuch anlegen'} →</button></form>
+    <small>Nur dein Passwort entschlüsselt die Daten. Passwort und Entschlüsselungsschlüssel werden nicht an den Server übertragen. Ohne Passwort gibt es keine Wiederherstellung.</small>
+    ${!exists ? '<button id="restore">Verschlüsseltes Backup importieren</button>' : ''}${legacy ? '<button id="legacy-backup">Bisherige Browserdaten als Backup sichern</button>' : ''}</section>`;
+  if ($('#legacy-backup')) $('#legacy-backup').onclick = () => downloadEnvelope(legacy, 'klassenbuch-browser-backup');
+  if ($('#restore')) $('#restore').onclick = () => {
+    setupToken = $('#setup').value.trim();
+    if (!setupToken) { $('#error').textContent = 'Bitte zuerst den Einrichtungsschlüssel eintragen.'; return; }
+    importBackup();
+  };
+  $('#unlock').onsubmit = async event => {
+    event.preventDefault(); if (busy) return; busy = true;
+    const button = $('#unlock button'); button.disabled = true;
+    const password = $('#password').value;
+    try {
+      if (exists) {
+        authToken = await deriveAuth(password, un64(serverState.salt));
+        const remote = await readVault();
+        const opened = await openEnvelope(remote.envelope, password);
+        key = opened.key; salt = opened.salt; data = opened.contents;
+        serverState.revision = remote.revision; lastEnvelope = remote.envelope;
+      } else {
+        setupToken = $('#setup').value.trim();
+        if (migrating) {
+          const envelope = JSON.parse(legacy), opened = await openEnvelope(envelope, password);
+          key = opened.key; salt = opened.salt; data = opened.contents;
+          authToken = await deriveAuth(password, salt);
+          await persist(envelope);
+          // Verify the server copy before removing the legacy browser copy.
+          const verified = await readVault();
+          if (JSON.stringify(verified.envelope) !== JSON.stringify(envelope)) throw Error('Übertragung konnte nicht geprüft werden. Browserdaten bleiben erhalten.');
+          if (localLegacy() === legacy) localStorage.removeItem(STORE);
+        } else {
+          if (password !== $('#confirm').value) throw Error('Die Passwörter stimmen nicht überein.');
+          salt = crypto.getRandomValues(new Uint8Array(16)); key = await derive(password, salt);
+          authToken = await deriveAuth(password, salt);
+          data = {year:'2026/27',courses:[],slots:[],lessons:[],assessments:[]};
+          await save();
+        }
+      }
+      $('#password').value = ''; resetTimer(); render();
+    } catch (error) {
+      key = null; salt = null; authToken = null; data = null;
+      $('#error').textContent = exists ? `Entsperren fehlgeschlagen. Passwort und Verbindung prüfen. ${error.message}` : `Einrichtung fehlgeschlagen: ${error.message}`;
+    } finally { busy = false; button.disabled = false; }
+  };
+}
+function resetTimer() { clearTimeout(timer); if (key) timer = setTimeout(lock, 300000); }
+async function lock() {
+  $('#modal').close(); $('#modal').innerHTML = ''; await queue;
+  key = null; salt = null; authToken = null; setupToken = ''; lastEnvelope = null; data = null; session = null;
+  clearTimeout(timer); await gate();
+}
+['pointerdown','keydown'].forEach(event => document.addEventListener(event, resetTimer));
+
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const actions = (label = 'Speichern') => `<div class="actions"><button type="button" data-close>Abbrechen</button><button class="primary" type="submit">${label}</button></div>`;
 const noteHTML = text => text ? `<span class="note">${esc(text)}</span>` : '<span class="muted">–</span>';
@@ -31,7 +159,7 @@ function render() {
   const menu = [['Übersicht', '◫'], ['Klassen & Kurse', '▦'], ['Stundenplan', '▤'], ['Jahresbilanz', '↗'], ['Noteneinträge', '▥'], ['Fehlzeiten', '◷'], ['Datenschutz', '♧']];
   $('#app').innerHTML = `<aside><div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div>
     <nav>${menu.map(([name, icon]) => `<button data-nav="${name}" class="${view === name ? 'active' : ''}"><span>${icon}</span>${name}</button>`).join('')}</nav>
-    <footer><span class="badge">● Lokal verschlüsselt</span><p>Dein Unterricht. Deine Daten.</p><button id="lock" class="textbtn">↪ Klassenbuch sperren</button></footer></aside>
+    <footer><span class="badge">● Verschlüsselt auf dem Server</span><p>Dein Unterricht. Deine Daten.</p><button id="lock" class="textbtn">↪ Klassenbuch sperren</button></footer></aside>
     <main><header class="top"><span>Mein Arbeitsraum <span class="muted"> / ${esc(view)}</span></span><div class="row"><span class="badge">Schuljahr ${esc(data.year)}</span><button class="textbtn" id="lockTop">♧ Sperren</button></div></header><div id="content"></div></main>`;
   document.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => {
     if (!discardSession()) return;
@@ -85,7 +213,7 @@ function modal(html, submit, wide = false) {
 async function mutate(fn) {
   const previous = structuredClone(data), previousSession = structuredClone(session);
   try { fn(); await save(); }
-  catch (error) { data = previous; session = previousSession; toast('Speichern fehlgeschlagen. Bitte erneut versuchen.'); throw error; }
+  catch (error) { data = previous; session = previousSession; toast(error.message); throw error; }
   render();
 }
 function courseForm(cid) {
@@ -94,8 +222,9 @@ function courseForm(cid) {
     const names = f.get('students').split('\n').map(n => n.trim()).filter(Boolean);
     if (!names.length || new Set(names).size !== names.length) throw Error('Bitte mindestens einen eindeutigen Namen verwenden.');
     await mutate(() => {
-      const students = names.map(name => course?.students.find(s => s.name === name) || { id: id(), name });
-      if (course) Object.assign(course, { name: f.get('name').trim(), subject: f.get('subject').trim(), students });
+      const current = data.courses.find(c => c.id === cid);
+      const students = names.map(name => current?.students.find(s => s.name === name) || { id: id(), name });
+      if (current) Object.assign(current, { name: f.get('name').trim(), subject: f.get('subject').trim(), students });
       else data.courses.push({ id: id(), name: f.get('name').trim(), subject: f.get('subject').trim(), students });
     });
   });
@@ -110,8 +239,9 @@ function slotForm() {
   modal(`<h2>Stunde hinzufügen</h2><form><label for="slot-course">Kurs</label><select id="slot-course" name="course">${courseSelect()}</select><label for="day">Wochentag</label><select id="day" name="day">${days.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select><label for="time">Beginn</label><input id="time" name="time" type="time" required value="08:00"><label for="room">Raum</label><input id="room" name="room" placeholder="z. B. B 204">${actions('Hinzufügen')}</form>`, f => mutate(() => data.slots.push({ id: id(), course: f.get('course'), day: Number(f.get('day')), time: f.get('time'), room: f.get('room') })));
 }
 function privacy() {
-  $('#content').innerHTML = `<span class="eyebrow">Dein geschützter Arbeitsraum</span><h1>Daten & Sicherheit</h1><div class="panel"><h2>Nur mit deinem Passwort lesbar</h2><p>Klassen, Namen, Stundenplan, Bewertungen, Kommentare, Fehlzeiten und Schulnoten werden gemeinsam mit AES-256-GCM verschlüsselt. Der Schlüssel wird mit PBKDF2-SHA-256 (600.000 Iterationen) aus deinem Passwort abgeleitet und nur während der Sitzung im Arbeitsspeicher gehalten.</p><p>Es gibt keine Cloud-Synchronisierung. Browserdaten löschen bedeutet Datenverlust, wenn kein Backup vorliegt. Nutze die App auf einem vertrauenswürdigen Gerät. Ein entsperrter Browser kann die Daten anzeigen.</p><button class="primary" id="export">↓ Verschlüsseltes Backup</button> <button id="import">Backup wiederherstellen</button><h3>Schuljahr</h3><p>Die Bezeichnung gilt für den gesamten aktuellen Datenbestand. Eine Änderung filtert oder archiviert keine Bewertungen. Für ein neues Schuljahr zuerst ein Backup sichern und einen getrennten Browserbereich verwenden.</p><form id="yearform"><label for="year">Bezeichnung des Schuljahres</label><input id="year" value="${esc(data.year)}" required><button type="submit" class="spaced">Bezeichnung speichern</button></form></div>`;
+  $('#content').innerHTML = `<span class="eyebrow">Dein geschützter Arbeitsraum</span><h1>Daten & Sicherheit</h1><div class="panel"><h2>Nur mit deinem Passwort lesbar</h2><p>Klassen, Namen, Stundenplan, Bewertungen, Kommentare, Fehlzeiten und Schulnoten werden im Browser gemeinsam mit AES-256-GCM verschlüsselt und auf deinem Server gespeichert. Der Schlüssel wird mit PBKDF2-SHA-256 (600.000 Iterationen) aus deinem Passwort abgeleitet und nur während der Sitzung im Arbeitsspeicher gehalten.</p><p>Deine Daten liegen verschlüsselt auf deinem Server und lassen sich auf anderen Geräten mit demselben Passwort öffnen. Änderungen anderer Geräte werden beim erneuten Entsperren geladen. Ein paralleles Speichern veralteter Daten wird blockiert. Nutze die App auf einem vertrauenswürdigen Gerät und sichere regelmäßig ein Backup.</p><button class="primary" id="export">↓ Verschlüsseltes Backup</button> <button id="import">Backup wiederherstellen</button><h3>Schuljahr</h3><p>Die Bezeichnung gilt für den gesamten aktuellen Datenbestand. Eine Änderung filtert oder archiviert keine Bewertungen. Für ein neues Schuljahr zuerst ein Backup sichern. Ein anderer Browser verwendet dasselbe Server-Klassenbuch.</p><form id="yearform"><label for="year">Bezeichnung des Schuljahres</label><input id="year" value="${esc(data.year)}" required><button type="submit" class="spaced">Bezeichnung speichern</button></form></div>`;
   $('#export').onclick = exportBackup; $('#import').onclick = importBackup;
+  if (localLegacy()) { const button = document.createElement('button'); button.textContent = 'Bisherige Browserdaten als Backup sichern'; button.onclick = () => downloadEnvelope(localLegacy(), 'klassenbuch-browser-backup'); $('#import').after(button); }
   $('#yearform').onsubmit = e => { e.preventDefault(); const year = $('#year').value; mutate(() => data.year = year).catch(() => {}); };
 }
 function startForm(cid) {
@@ -192,7 +322,7 @@ function absenceGroup(title, entries, open) {
 }
 function absenceForm(lessonId, studentId) {
   const lesson = data.lessons.find(l => l.id === lessonId), entry = lesson.absences.find(a => a.student === studentId);
-  modal(`<h2>Fehlzeit bearbeiten</h2><p>${esc(entry.name)} · ${esc(courseName(lesson.course))}<br>${esc(lesson.date)} · ${esc(lesson.title)}</p><form><label for="absence-status">Status</label><select id="absence-status" name="status">${Object.entries(Records.attendance).map(([value, label]) => `<option value="${value}" ${entry.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select><label for="absence-comment">Kommentar (optional)</label><textarea id="absence-comment" name="comment" rows="3" maxlength="4000">${esc(entry.comment || '')}</textarea>${actions()}</form>`, f => mutate(() => Records.setResult(lesson, { id: entry.student, name: entry.name }, f.get('status'), f.get('comment'))));
+  modal(`<h2>Fehlzeit bearbeiten</h2><p>${esc(entry.name)} · ${esc(courseName(lesson.course))}<br>${esc(lesson.date)} · ${esc(lesson.title)}</p><form><label for="absence-status">Status</label><select id="absence-status" name="status">${Object.entries(Records.attendance).map(([value, label]) => `<option value="${value}" ${entry.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select><label for="absence-comment">Kommentar (optional)</label><textarea id="absence-comment" name="comment" rows="3" maxlength="4000">${esc(entry.comment || '')}</textarea>${actions()}</form>`, f => mutate(() => Records.setResult(data.lessons.find(l => l.id === lessonId), { id: entry.student, name: entry.name }, f.get('status'), f.get('comment'))));
 }
 function gradeOptions(value) {
   return `<option value="">Keine Note</option>${[1, 2, 3, 4, 5, 6].map(v => `<option value="${v}" ${v === value ? 'selected' : ''}>${v}</option>`).join('')}`;
@@ -293,6 +423,31 @@ function lessonHTML(lesson) {
   }).join('')}</tbody></table></div></details>`;
 }
 
-async function exportBackup(){await queue;let raw=localStorage.getItem(STORE);if(!raw)return;let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([raw],{type:'application/json'}));a.download='klassenbuch-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-function importBackup(){let input=document.createElement('input');input.type='file';input.accept='.json';input.onchange=async()=>{try{const raw=await input.files[0].text(),v=JSON.parse(raw);if(v.v!==1||!v.salt||!v.iv||!v.cipher)throw Error('Ungültiges Backup');const password=prompt('Passwort des Backups eingeben:');if(!password)return;let k=await derive(password,un64(v.salt)),d=JSON.parse(new TextDecoder().decode(await decrypt(k,un64(v.iv),un64(v.cipher))));Records.normalize(d);if(localStorage.getItem(STORE)&&!confirm('Aktuelle Daten durch das Backup ersetzen? Exportiere vorher bei Bedarf eine Sicherung.'))return;await queue;localStorage.setItem(STORE,raw);await lock();toast('Backup importiert. Bitte entsperren.')}catch{toast('Import fehlgeschlagen: Passwort oder Datei prüfen.')}};input.click()}
+async function exportBackup() {
+  try { await queue; const remote = await readVault(); downloadEnvelope(JSON.stringify(remote.envelope)); }
+  catch (error) { toast(error.message); }
+}
+function importBackup() {
+  const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
+  input.onchange = async () => {
+    try {
+      if (!input.files[0]) return;
+      const envelope = JSON.parse(await input.files[0].text());
+      const password = prompt('Passwort des Backups eingeben:'); if (!password) return;
+      const opened = await openEnvelope(envelope, password);
+      if (serverState.exists) {
+        if (!key || !authToken) throw Error('Bitte zuerst das Server-Klassenbuch entsperren.');
+        if (!confirm('Serverdaten durch das Backup ersetzen? Das Passwort des Server-Klassenbuchs bleibt unverändert.')) return;
+        await mutate(() => data = opened.contents);
+      } else {
+        key = opened.key; salt = opened.salt; data = opened.contents;
+        authToken = await deriveAuth(password, salt);
+        await persist(envelope);
+        resetTimer(); render();
+      }
+      toast('Backup auf dem Server gespeichert.');
+    } catch (error) { toast('Import fehlgeschlagen: ' + error.message); }
+  };
+  input.click();
+}
 gate();
