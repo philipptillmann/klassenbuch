@@ -14,6 +14,8 @@ const ctx={fetch:fetchMock,getRemote:()=>JSON.stringify(remoteEnvelope),crypto,T
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/sjcl.js','utf8'),ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/records.js','utf8'),ctx);
+vm.runInContext(fs.readFileSync(__dirname+'/dist/exports.js','utf8'),ctx);
+vm.runInContext(fs.readFileSync(__dirname+'/dist/reminders.js','utf8'),ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/app.js','utf8').replace(/gate\(\);\s*$/,''),ctx);
 vm.runInContext(`(async()=>{
  salt=crypto.getRandomValues(new Uint8Array(16));

@@ -19,7 +19,7 @@ except FileExistsError:
 load_config([], environ={})  # Fail before touching the service if settings are invalid.
 PYENV
 python3 -m unittest discover -s tests -p 'test_*.py'
-if command -v node >/dev/null; then node --check dist/app.js; node --check dist/records.js; node test.cjs; node tests/records.cjs; fi
+if command -v node >/dev/null; then node --check dist/app.js; node --check dist/records.js; node test.cjs; node tests/records.cjs; node tests/exports-reminders.cjs; fi
 SERVICE_USER="$(id -un)"
 SERVICE_GROUP="$(id -gn)"
 SERVICE_FILE="$(mktemp)"

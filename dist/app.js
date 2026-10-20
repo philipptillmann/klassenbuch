@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s),id=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''),esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let data,key,salt,view='Übersicht',selectedCourse='',absenceCourse='',busy=false,session=null,queue=Promise.resolve(),timer;const STORE='stundenbuch.v1',days=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag'],symbols=['—','−','0','+','++'];
+let data,key,salt,view='Übersicht',selectedCourse='',absenceCourse='',busy=false,session=null,queue=Promise.resolve(),timer;const STORE='stundenbuch.v1',days=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag'],symbols=['− −','−','0','+','+ +'];
 const b64=a=>{let s='';for(let i=0;i<a.length;i+=8192)s+=String.fromCharCode(...a.subarray(i,i+8192));return btoa(s)},un64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const bits = bytes => sjcl.codec.base64.toBits(b64(bytes));
 const bytes = words => un64(sjcl.codec.base64.fromBits(words));
@@ -135,7 +135,7 @@ async function gate() {
 }
 function resetTimer() { clearTimeout(timer); if (key) timer = setTimeout(lock, 300000); }
 async function lock() {
-  $('#modal').close(); $('#modal').innerHTML = ''; await queue;
+  stopReminders(); $('#modal').close(); $('#modal').innerHTML = ''; await queue;
   key = null; salt = null; authToken = null; setupToken = ''; lastEnvelope = null; data = null; session = null;
   clearTimeout(timer); await gate();
 }
@@ -156,7 +156,7 @@ function courseSelect(cid = selectedCourse) {
 function discardSession() { return !session || confirm('Diese ungespeicherte Stunde verwerfen?'); }
 function render() {
   Records.normalize(data);
-  const menu = [['Übersicht', '◫'], ['Klassen & Kurse', '▦'], ['Stundenplan', '▤'], ['Jahresbilanz', '↗'], ['Noteneinträge', '▥'], ['Fehlzeiten', '◷'], ['Datenschutz', '♧']];
+  const menu = [['Übersicht', '◫'], ['Klassen & Kurse', '▦'], ['Stundenplan', '▤'], ['Jahresbilanz', '↗'], ['Noteneinträge', '▥'], ['Fehlzeiten', '◷'], ['Erinnerungen', '◴'], ['Datenschutz', '♧']];
   $('#app').innerHTML = `<aside><div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div>
     <nav>${menu.map(([name, icon]) => `<button data-nav="${name}" class="${view === name ? 'active' : ''}"><span>${icon}</span>${name}</button>`).join('')}</nav>
     <footer><span class="badge">● Verschlüsselt auf dem Server</span><p>Dein Unterricht. Deine Daten.</p><button id="lock" class="textbtn">↪ Klassenbuch sperren</button></footer></aside>
@@ -166,8 +166,9 @@ function render() {
     view = b.dataset.nav; session = null; render();
   });
   $('#lock').onclick = $('#lockTop').onclick = () => { if (discardSession()) lock(); };
+  startReminders();
   if (session) { rating(); return; }
-  ({ 'Übersicht': overview, 'Klassen & Kurse': coursesView, 'Stundenplan': schedule, 'Jahresbilanz': balance, 'Noteneinträge': assessmentsView, 'Fehlzeiten': absencesView, 'Datenschutz': privacy }[view] || overview)();
+  ({ 'Übersicht': overview, 'Klassen & Kurse': coursesView, 'Stundenplan': schedule, 'Jahresbilanz': balance, 'Noteneinträge': assessmentsView, 'Fehlzeiten': absencesView, 'Erinnerungen': remindersView, 'Datenschutz': privacy }[view] || overview)();
 }
 function overview() {
   const total = data.courses.reduce((n, c) => n + c.students.length, 0);
@@ -230,17 +231,17 @@ function courseForm(cid) {
   });
 }
 function schedule() {
-  $('#content').innerHTML = `<div class="row"><div><span class="eyebrow">Deine Woche</span><h1>Stundenplan</h1><p>Ein fester Platz für jeden Kurs.</p></div><button class="primary" id="addslot">＋ Stunde hinzufügen</button></div><div class="week">${days.map((day, i) => `<section class="day"><h3>${day}</h3>${data.slots.filter(s => s.day === i).sort((a, b) => a.time.localeCompare(b.time)).map(s => `<div class="panel"><strong>${esc(s.time)}</strong><p>${esc(courseName(s.course))}</p><small>${esc(s.room)}</small><button class="textbtn" data-del-slot="${esc(s.id)}" aria-label="Stunde entfernen">×</button></div>`).join('') || '<p>Keine Stunden</p>'}</section>`).join('')}</div>`;
+  $('#content').innerHTML = `<div class="row"><div><span class="eyebrow">Deine Woche</span><h1>Stundenplan</h1><p>Ein fester Platz für jeden Kurs.</p></div><button class="primary" id="addslot">＋ Stunde hinzufügen</button></div><div class="week">${days.map((day, i) => `<section class="day"><h3>${day}</h3>${data.slots.filter(s => s.day === i).sort((a, b) => a.time.localeCompare(b.time)).map(s => `<div class="panel"><strong>${esc(s.time)}</strong><p>${esc(courseName(s.course))}</p><small>${esc(s.room)} · ${esc(s.duration || 45)} Min.</small><button class="textbtn" data-del-slot="${esc(s.id)}" aria-label="Stunde entfernen">×</button></div>`).join('') || '<p>Keine Stunden</p>'}</section>`).join('')}</div>`;
   $('#addslot').onclick = slotForm;
   document.querySelectorAll('[data-del-slot]').forEach(b => b.onclick = () => mutate(() => data.slots = data.slots.filter(s => s.id !== b.dataset.delSlot)).catch(() => {}));
 }
 function slotForm() {
   if (!data.courses.length) { courseForm(); return; }
-  modal(`<h2>Stunde hinzufügen</h2><form><label for="slot-course">Kurs</label><select id="slot-course" name="course">${courseSelect()}</select><label for="day">Wochentag</label><select id="day" name="day">${days.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select><label for="time">Beginn</label><input id="time" name="time" type="time" required value="08:00"><label for="room">Raum</label><input id="room" name="room" placeholder="z. B. B 204">${actions('Hinzufügen')}</form>`, f => mutate(() => data.slots.push({ id: id(), course: f.get('course'), day: Number(f.get('day')), time: f.get('time'), room: f.get('room') })));
+  modal(`<h2>Stunde hinzufügen</h2><form><label for="slot-course">Kurs</label><select id="slot-course" name="course">${courseSelect()}</select><label for="day">Wochentag</label><select id="day" name="day">${days.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select><label for="time">Beginn</label><input id="time" name="time" type="time" required value="08:00"><label for="duration">Dauer in Minuten</label><input id="duration" name="duration" type="number" min="5" max="300" value="45" required><label for="room">Raum</label><input id="room" name="room" placeholder="z. B. B 204">${actions('Hinzufügen')}</form>`, f => mutate(() => data.slots.push({ id: id(), course: f.get('course'), day: Number(f.get('day')), time: f.get('time'), duration: Number(f.get('duration')), room: f.get('room') })));
 }
 function privacy() {
-  $('#content').innerHTML = `<span class="eyebrow">Dein geschützter Arbeitsraum</span><h1>Daten & Sicherheit</h1><div class="panel"><h2>Nur mit deinem Passwort lesbar</h2><p>Klassen, Namen, Stundenplan, Bewertungen, Kommentare, Fehlzeiten und Schulnoten werden im Browser gemeinsam mit AES-256-GCM verschlüsselt und auf deinem Server gespeichert. Der Schlüssel wird mit PBKDF2-SHA-256 (600.000 Iterationen) aus deinem Passwort abgeleitet und nur während der Sitzung im Arbeitsspeicher gehalten.</p><p>Deine Daten liegen verschlüsselt auf deinem Server und lassen sich auf anderen Geräten mit demselben Passwort öffnen. Änderungen anderer Geräte werden beim erneuten Entsperren geladen. Ein paralleles Speichern veralteter Daten wird blockiert. Nutze die App auf einem vertrauenswürdigen Gerät und sichere regelmäßig ein Backup.</p><button class="primary" id="export">↓ Verschlüsseltes Backup</button> <button id="import">Backup wiederherstellen</button><h3>Schuljahr</h3><p>Die Bezeichnung gilt für den gesamten aktuellen Datenbestand. Eine Änderung filtert oder archiviert keine Bewertungen. Für ein neues Schuljahr zuerst ein Backup sichern. Ein anderer Browser verwendet dasselbe Server-Klassenbuch.</p><form id="yearform"><label for="year">Bezeichnung des Schuljahres</label><input id="year" value="${esc(data.year)}" required><button type="submit" class="spaced">Bezeichnung speichern</button></form></div>`;
-  $('#export').onclick = exportBackup; $('#import').onclick = importBackup;
+  $('#content').innerHTML = `<span class="eyebrow">Dein geschützter Arbeitsraum</span><h1>Daten & Sicherheit</h1><div class="panel"><h2>Nur mit deinem Passwort lesbar</h2><p>Klassen, Namen, Stundenplan, Bewertungen, Kommentare, Fehlzeiten und Schulnoten werden im Browser gemeinsam mit AES-256-GCM verschlüsselt und auf deinem Server gespeichert. Der Schlüssel wird mit PBKDF2-SHA-256 (600.000 Iterationen) aus deinem Passwort abgeleitet und nur während der Sitzung im Arbeitsspeicher gehalten.</p><p>Deine Daten liegen verschlüsselt auf deinem Server und lassen sich auf anderen Geräten mit demselben Passwort öffnen. Änderungen anderer Geräte werden beim erneuten Entsperren geladen. Ein paralleles Speichern veralteter Daten wird blockiert. Nutze die App auf einem vertrauenswürdigen Gerät und sichere regelmäßig ein Backup.</p><button class="primary" id="export">↓ Verschlüsseltes Backup</button> <button id="import">Backup wiederherstellen</button><h3>Unverschlüsselter CSV-Export</h3><p>Schülerliste, Mitarbeit, Kommentare, Fehlzeiten und Schulnoten als lesbare Tabelle. Diese Datei ist nicht passwortgeschützt.</p><button id="export-csv">↓ Unverschlüsselte CSV exportieren</button><h3>Schuljahr</h3><p>Die Bezeichnung gilt für den gesamten aktuellen Datenbestand. Eine Änderung filtert oder archiviert keine Bewertungen. Für ein neues Schuljahr zuerst ein Backup sichern. Ein anderer Browser verwendet dasselbe Server-Klassenbuch.</p><form id="yearform"><label for="year">Bezeichnung des Schuljahres</label><input id="year" value="${esc(data.year)}" required><button type="submit" class="spaced">Bezeichnung speichern</button></form></div>`;
+  $('#export').onclick = exportBackup; $('#import').onclick = importBackup; $('#export-csv').onclick = exportCsv;
   if (localLegacy()) { const button = document.createElement('button'); button.textContent = 'Bisherige Browserdaten als Backup sichern'; button.onclick = () => downloadEnvelope(localLegacy(), 'klassenbuch-browser-backup'); $('#import').after(button); }
   $('#yearform').onsubmit = e => { e.preventDefault(); const year = $('#year').value; mutate(() => data.year = year).catch(() => {}); };
 }
@@ -261,7 +262,7 @@ function rating() {
     ${student ? `<div class="student"><div class="avatar">${esc(student.name.split(' ').map(n => n[0]).slice(0, 2).join(''))}</div><h1>${esc(student.name)}</h1><p>Wie war die Mitarbeit in dieser Stunde?</p><label for="card-comment">Kommentar (optional)</label><textarea id="card-comment" rows="2" maxlength="4000" placeholder="z. B. Gute Argumente in der Diskussion">${esc(Records.comment(session, student.id))}</textarea></div>
       <div class="ratings">${[2, 1, 0, -1, -2].map(v => `<button data-value="${v}" aria-label="Bewertung ${symbols[v + 2]}">${symbols[v + 2]}</button>`).join('')}</div><div class="row spaced"><button id="absent">Abwesend vermerken</button><button class="textbtn" id="skip">Ohne Eintrag überspringen →</button></div>` :
       `<div class="student"><div class="avatar">✓</div><h1>Alles im Blick.</h1><p>${present} Bewertungen · ${absent} Abwesenheiten · ${roster.length - present - absent} übersprungen</p><button class="primary" id="finish">Stunde verschlüsselt speichern</button></div>`}
-    <button class="textbtn spaced" id="back" ${session.index ? '' : 'disabled'}>← Vorherige Karte</button><p><small>++ = 2 · + = 1 · 0 = 0 · − = −1 · — = −2<br>Abwesende und übersprungene Schüler fließen nicht in den Schnitt ein.<br>Abwesenheiten werden zunächst als „Offen“ gespeichert.</small></p></section>`;
+    <button class="textbtn spaced" id="back" ${session.index ? '' : 'disabled'}>← Vorherige Karte</button><p><small>+ + = 2 · + = 1 · 0 = 0 · − = −1 · − − = −2<br>Abwesende und übersprungene Schüler fließen nicht in den Schnitt ein.<br>Abwesenheiten werden zunächst als „Offen“ gespeichert.</small></p></section>`;
   $('#cancel').onclick = () => { if (discardSession()) { session = null; render(); } };
   $('#back').onclick = () => { session.index--; rating(); };
   const advance = outcome => {
@@ -400,7 +401,7 @@ function balance() {
   const students = new Map(course.students.map(s => [s.id, s.name]));
   for (const record of [...lessons, ...entries]) for (const student of Records.roster(data, course.id, record)) if (!students.has(student.id)) students.set(student.id, student.name);
   $('#results').innerHTML = `${summarySection(entries)}<section class="panel spaced"><h2>${esc(course.name)} · ${lessons.length} erfasste ${lessons.length === 1 ? 'Stunde' : 'Stunden'}</h2>
-    <div class="table-scroll"><table class="balance-table"><thead><tr><th>Name</th><th>Bewertungen</th><th>++ / + / 0 / − / —</th><th>Mitarbeit Ø<br>−2 bis +2</th><th>Tests / weitere Leistungen Ø<br>1 bis 6</th><th>Fehlstunden</th></tr></thead><tbody>${[...students].map(([sid, name]) => {
+    <div class="table-scroll"><table class="balance-table"><thead><tr><th>Name</th><th>Bewertungen</th><th>+ + / + / 0 / − / − −</th><th>Mitarbeit Ø<br>−2 bis +2</th><th>Tests / weitere Leistungen Ø<br>1 bis 6</th><th>Fehlstunden</th></tr></thead><tbody>${[...students].map(([sid, name]) => {
       const r = Records.ratings(data, course.id, sid), a = Records.absences(data, course.id).filter(a => a.student === sid);
       return `<tr><td>${esc(name)}</td><td>${r.length}</td><td>${[2, 1, 0, -1, -2].map(v => r.filter(a => a.value === v).length).join(' / ')}</td><td><strong>${avg(sid, course.id)}</strong></td><td>${Records.gradeMean(data, course.id, sid)}</td><td>${a.length}${a.some(a => a.status === 'open') ? ` <span class="status open">${a.filter(a => a.status === 'open').length} offen</span>` : ''}</td></tr>`;
     }).join('')}</tbody></table></div><p><small>Arithmetische Schnitte; keine automatische Gesamtnote. Bilanznoten werden separat geführt.</small></p></section>
@@ -423,6 +424,79 @@ function lessonHTML(lesson) {
   }).join('')}</tbody></table></div></details>`;
 }
 
+let reminderInterval=null,reminderLastCheck=0,reminderSeen=new Set(),reminderChecking=false;
+function stopReminders() {
+  if(reminderInterval) clearInterval(reminderInterval);
+  reminderInterval=null;reminderLastCheck=0;reminderSeen.clear();
+}
+async function notification(text='Zeit, die Mitarbeit der letzten Unterrichtsstunde einzutragen.') {
+  if(typeof Notification==='undefined' || Notification.permission!=='granted') throw Error('Browser-Benachrichtigungen sind nicht erlaubt.');
+  if('serviceWorker' in navigator) {
+    await navigator.serviceWorker.register('reminder-sw.js');
+    const ready=await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('Benachrichtigungsdienst ist nicht bereit.')),5000))]);
+    if(!key)return;
+    await ready.showNotification('Klassenbuch · Erinnerung',{body:text,tag:'klassenbuch-reminder'});
+  } else new Notification('Klassenbuch · Erinnerung',{body:text,tag:'klassenbuch-reminder'});
+}
+async function checkReminders(now=new Date()) {
+  if(!key || !data || reminderChecking) return;
+  reminderChecking=true;
+  try {
+    const due=Reminders.due(data,now,reminderLastCheck || now.getTime()-60000).filter(item=>!reminderSeen.has(item.id));
+    reminderLastCheck=now.getTime();
+    if(due.length) {
+      await notification();
+      due.forEach(item=>reminderSeen.add(item.id));
+    }
+  } catch(error) {toast('Erinnerung nicht angezeigt: '+error.message);}
+  finally {reminderChecking=false;}
+}
+function startReminders() {
+  if(!key || !Reminders.settings(data.reminders).enabled || typeof Notification==='undefined' || Notification.permission!=='granted') {
+    stopReminders();return;
+  }
+  if(reminderInterval) return;
+  reminderLastCheck=Date.now()-60000;
+  reminderInterval=setInterval(()=>checkReminders(),30000);
+  checkReminders();
+}
+function remindersView() {
+  const config=Reminders.settings(data.reminders);
+  const permission=typeof Notification==='undefined'?'unsupported':Notification.permission;
+  const label={granted:'Erlaubt',denied:'Blockiert – bitte in den Browser-Einstellungen ändern',default:'Noch nicht erlaubt',unsupported:'Von diesem Browser nicht unterstützt'}[permission];
+  $('#content').innerHTML=`<span class="eyebrow">Noten rechtzeitig festhalten</span><h1>Erinnerungen</h1>
+    <section class="panel"><h2>Erinnerung anhand deines Stundenplans</h2><p>Benachrichtigungen funktionieren derzeit, solange Klassenbuch geöffnet und entsperrt bleibt. Bei geschlossener oder gesperrter App werden keine Erinnerungen ausgelöst. Browser und Betriebssystem können Hintergrund-Tabs verzögern.</p>
+    <p>Benachrichtigungen auf diesem Gerät: <strong>${esc(label)}</strong></p><div class="row"><button id="allow-notifications" ${['denied','unsupported'].includes(permission)?'disabled':''}>Benachrichtigungen erlauben</button><button id="test-notification" ${permission!=='granted'?'disabled':''}>Testbenachrichtigung</button></div>
+    <form id="reminder-form"><label for="reminder-enabled">Erinnerungen</label><select id="reminder-enabled" name="enabled"><option value="false" ${!config.enabled?'selected':''}>Aus</option><option value="true" ${config.enabled?'selected':''}>Ein</option></select>
+    <label for="reminder-mode">Wann erinnern?</label><select id="reminder-mode" name="mode"><option value="after" ${config.mode==='after'?'selected':''}>Nach jeder Unterrichtsstunde</option><option value="daily" ${config.mode==='daily'?'selected':''}>Einmal täglich an Unterrichtstagen</option></select>
+    <div class="form-grid"><div><label for="reminder-delay">Nach Stundenende</label><select id="reminder-delay" name="delay">${[0,5,10,15].map(n=>`<option value="${n}" ${config.delay===n?'selected':''}>${n} Minuten</option>`).join('')}</select></div><div><label for="reminder-time">Tägliche Uhrzeit</label><input id="reminder-time" name="time" type="time" value="${esc(config.time)}" required></div></div>
+    <p><small>Das Stundenende ergibt sich aus Beginn + Dauer im Stundenplan (bisherige Stunden: 45 Minuten). Uhrzeiten gelten in der lokalen Zeitzone dieses Geräts. Verspätungen bis fünf Minuten werden nachgeholt, ältere Erinnerungen nicht. Gleichzeitige Stunden lösen eine gemeinsame Nachricht aus.</small></p><p><small>Die Einstellungen werden verschlüsselt auf dem Server gespeichert. Die Browser-Berechtigung muss auf jedem Gerät separat erteilt werden. Der Stundenplan und die Erinnerungstermine bleiben verschlüsselt; die Benachrichtigung nennt keine Schüler oder Kurse.</small></p>
+    <button class="primary" type="submit">Erinnerungen speichern</button></form></section>`;
+  $('#allow-notifications').onclick=async()=>{try{await Notification.requestPermission();startReminders();remindersView();}catch(error){toast(error.message);}};
+  $('#test-notification').onclick=()=>notification('Test: Klassenbuch-Erinnerungen sind auf diesem Gerät erlaubt.').catch(error=>toast(error.message));
+  $('#reminder-form').onsubmit=async event=>{
+    event.preventDefault();const button=event.target.querySelector('[type="submit"]');button.disabled=true;
+    try {
+      const fields=new FormData(event.target);
+      const next=Reminders.validate({enabled:fields.get('enabled')==='true',mode:fields.get('mode'),delay:Number(fields.get('delay')),time:fields.get('time')});
+      if(next.enabled && permission!=='granted') throw Error('Bitte zuerst Benachrichtigungen auf diesem Gerät erlauben.');
+      await mutate(()=>data.reminders=next);toast('Erinnerungen gespeichert');
+    }catch(error){toast(error.message);button.disabled=false;}
+  };
+}
+
+async function exportCsv() {
+  if (!confirm('Diese CSV enthält Namen, Noten, Fehlzeiten und Kommentare unverschlüsselt. Nur an einem sicheren Ort speichern. Exportieren?')) return;
+  try {
+    await queue;
+    const remote=await readVault();
+    const latest=Records.normalize(JSON.parse(new TextDecoder().decode(await decrypt(key,un64(remote.envelope.iv),un64(remote.envelope.cipher)))));
+    const link=document.createElement('a');
+    link.href=URL.createObjectURL(new Blob([CsvExport.build(latest)],{type:'text/csv;charset=utf-8'}));
+    link.download='klassenbuch-export-'+new Date().toISOString().slice(0,10)+'.csv';
+    link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  } catch(error) {toast(error.message);}
+}
 async function exportBackup() {
   try { await queue; const remote = await readVault(); downloadEnvelope(JSON.stringify(remote.envelope)); }
   catch (error) { toast(error.message); }

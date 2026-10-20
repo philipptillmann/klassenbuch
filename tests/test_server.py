@@ -36,7 +36,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
             self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
             self.assertIn("script-src 'self'", response.headers['Content-Security-Policy'])
-        for asset in ['app.js', 'records.js', 'sjcl.js', 'crypto-worker.js', 'style.css']:
+        for asset in ['app.js', 'records.js', 'exports.js', 'reminders.js', 'reminder-sw.js', 'sjcl.js', 'crypto-worker.js', 'style.css']:
             with urllib.request.urlopen(self.origin + '/' + asset) as response:
                 self.assertEqual(response.status, 200)
 

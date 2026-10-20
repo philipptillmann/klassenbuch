@@ -27,7 +27,7 @@ const {startServer} = require('./browser_helpers.cjs');
     await page.getByLabel('Stunde / Thema').fill('Synthetische Teststunde');
     await page.getByRole('button',{name:'Karten starten'}).click();
     await page.getByLabel('Kommentar (optional)').fill('Kommentar <script>synthetisch</script>');
-    await page.getByRole('button',{name:'Bewertung ++',exact:true}).click();
+    await page.getByRole('button',{name:'Bewertung + +',exact:true}).click();
     await page.getByLabel('Kommentar (optional)').fill('Fehlt im Test');
     await page.getByRole('button',{name:'Abwesend vermerken',exact:true}).click();
     await page.getByRole('button',{name:'Ohne Eintrag überspringen'}).click();

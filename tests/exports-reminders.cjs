@@ -1,0 +1,36 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const context=vm.createContext({assert,console,Date});
+for(const name of ['records','exports','reminders'])vm.runInContext(fs.readFileSync(__dirname+'/../dist/'+name+'.js','utf8'),context);
+const {CsvExport,Reminders}=vm.runInContext('({CsvExport,Reminders})',context);
+const data={year:'2026/27',courses:[{id:'c',name:'Testkurs',subject:'Testfach',students:[{id:'s',name:'=1+1'}]}],slots:[{id:'slot',course:'c',day:0,time:'09:00'}],lessons:[{course:'c',date:'2026-10-19',title:'Teststunde',ratings:[{student:'s',name:'=1+1',value:2,comment:'A;B\n"Zitat"'}],absences:[{student:'a',name:'Testkind',status:'open',comment:'Fehlt'}]}],assessments:[{course:'c',date:'2026-10-19',title:'Halbjahr',kind:'semester1',grades:[{student:'s',name:'=1+1',grade:2}]}]};
+const csv=CsvExport.build(data);
+assert.equal(csv.charCodeAt(0),0xFEFF);
+assert.ok(csv.includes('"Schüler-ID"'));
+assert.ok(csv.includes('"\'=1+1"'));
+assert.ok(csv.includes('"A;B\n""Zitat"""'));
+assert.ok(csv.includes('"\'+ +";"2"'));
+assert.ok(csv.includes('"Abwesenheit"'));
+assert.ok(csv.includes('"Halbjahresnote · 1. Halbjahr"'));
+assert.ok(csv.includes('"Offen"'));
+assert.ok(csv.endsWith('\r\n'));
+assert.equal(Reminders.settings().enabled,false);
+for(const delay of [0,5,10,15]){
+ data.reminders={enabled:true,mode:'after',delay,time:'16:00'};
+ const now=new Date(2026,9,19,9,45+delay);
+ assert.equal(Reminders.due(data,now,now.getTime()-1000).length,1);
+ assert.equal(Reminders.due(data,now,now.getTime()).length,0);
+}
+data.reminders={enabled:true,mode:'daily',delay:5,time:'16:00'};
+assert.equal(Reminders.due(data,new Date(2026,9,19,16,0)).length,1);
+assert.equal(Reminders.due(data,new Date(2026,9,18,16,0)).length,0);
+data.slots.push({...data.slots[0],id:'second'});
+assert.equal(Reminders.due(data,new Date(2026,9,19,16,0)).length,1);
+data.reminders={enabled:true,mode:'after',delay:0,time:'16:00'};
+assert.equal(Reminders.due(data,new Date(2026,9,19,10,0),0).length,0);
+data.slots=[{id:'late',course:'c',day:0,time:'23:45',duration:45}];
+assert.equal(Reminders.due(data,new Date(2026,9,20,0,30)).length,1);
+data.reminders.enabled=false;
+assert.equal(Reminders.due(data,new Date(2026,9,20,0,30)).length,0);
+assert.throws(()=>Reminders.validate({enabled:true,mode:'daily',delay:6,time:'16:00'}));
+assert.throws(()=>Reminders.validate({enabled:true,mode:'daily',delay:5,time:'25:00'}));
+console.log('PASS: CSV plaintext/escaping/formula protection, delay choices, daily/weekdays, deduplication, midnight and expiry');

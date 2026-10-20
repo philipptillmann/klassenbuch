@@ -110,6 +110,22 @@ Regelmäßig Backups exportieren und zusätzlich das Server-Datenverzeichnis sic
 
 Ein Datenbestand enthält ein Schuljahr. Die Schuljahrbezeichnung archiviert oder filtert keine Daten. Ein anderer Browser öffnet dasselbe Server-Klassenbuch. Frühere übersprungene Karten werden nicht automatisch zu Fehlzeiten. Historische Einträge entfernter Schüler bleiben bearbeitbar.
 
+## CSV-Export
+
+Unter **Datenschutz → Unverschlüsselte CSV exportieren** steht ein lesbarer Export des aktuellen Serverbestands bereit. Enthalten sind aktuelle Schülerlisten (auch ohne Bewertung), Mitarbeit mit Punktwerten, Kommentare, Fehlzeiten und sämtliche Schulnoten einschließlich vorläufiger und Halbjahresnoten. Historische Einträge entfernter Schüler bleiben enthalten. Der Wochenstundenplan und Erinnerungseinstellungen sind nicht Teil dieses Tabellenexports.
+
+Die Datei verwendet UTF-8 mit BOM, Semikolon als Trennzeichen sowie korrekt maskierte Anführungszeichen und mehrzeilige Kommentare. Textfelder mit möglichen Tabellenformeln werden mit einem führenden Apostroph geschützt; numerische Noten/Punkte bleiben Zahlen. CSV ist **nicht verschlüsselt** und kein vollständiges Wiederherstellungs-Backup. Vor dem Download wird darauf hingewiesen. Für Sicherung/Wiederherstellung weiterhin das verschlüsselte Backup verwenden.
+
+Doppelte Bewertungssymbole werden als **+ +** und **− −** angezeigt (Karten, Auswahlfelder, Stundenverlauf, Bilanz und CSV). Die numerischen Werte und vorhandenen Daten ändern sich dadurch nicht.
+
+## Erinnerungen (erste Umsetzung von Issue #16)
+
+Unter **Erinnerungen** kann auf diesem Gerät die Browser-Berechtigung angefordert und eine Testnachricht angezeigt werden. Zur Auswahl stehen 0, 5, 10 oder 15 Minuten nach Stundenende oder eine tägliche Uhrzeit an Tagen mit Unterricht. Das Ende wird aus Beginn + Dauer im Stundenplan ermittelt; neue Einträge bieten eine Dauer-Eingabe, vorhandene Einträge werden mit 45 Minuten behandelt. Zeitberechnung erfolgt in der lokalen Zeitzone des jeweiligen Geräts.
+
+Die Einstellungen werden mit dem Datenbestand verschlüsselt gespeichert. Die Berechtigung muss pro Gerät erteilt werden. Nachrichten enthalten keine Namen oder Kursdaten. Der Zeitplaner läuft nur in der geöffneten, entsperrten App; nach der Sperre wird er gestoppt. Hintergrund-Tabs können vom Browser verzögert werden. Bis zu fünf Minuten verspätete Erinnerungen werden nachgeholt, ältere verworfen. Gleichzeitige Termine werden gebündelt, doppelte Nachrichten während derselben entsperrten Sitzung vermieden. Ohne Stundenplantermine oder bei deaktivierten/blockierten Benachrichtigungen gibt es keine Nachrichten.
+
+**Push bei geschlossener oder gesperrter App ist noch offen.** Der Service Worker zeigt ausschließlich vom geöffneten Fenster ausgelöste Nachrichten an und verarbeitet Klicks; er enthält weder Schlüssel noch Stundenplan und ist kein Hintergrund-Zeitplaner. Der Server kann den verschlüsselten Stundenplan nicht auswerten. Für echte zeitgesteuerte Web-Push-Nachrichten müsste der Browser dem Server zusätzliche Erinnerungstermine (ohne Namen/Kursinhalte) und Push-Abonnements übermitteln oder eine andere Hintergrundlösung gewählt werden. Die dafür nötige Datenschutzentscheidung wird in Issue #16 dokumentiert; das Issue bleibt offen. Es werden bislang keine separaten Terminmetadaten oder Push-Abonnements an den Server übertragen.
+
 ## Prüfungen
 
 ```bash
@@ -117,6 +133,7 @@ node --check dist/app.js
 node --check dist/records.js
 node test.cjs
 node tests/records.cjs
+node tests/exports-reminders.cjs
 python3 -m unittest discover -s tests
 bash -n install.sh update.sh
 ```
@@ -126,12 +143,15 @@ Geprüft: Kryptografie, native/Fallback-Kompatibilität und getrennte Authentifi
 Optionale Browser-Durchläufe benötigen Playwright und Chromium (nicht für den Betrieb nötig). Sie starten selbst isolierte Testserver mit temporären Datenverzeichnissen:
 
 ```bash
+node tests/review-browser.cjs
 node tests/browser.cjs
 HTTP_FALLBACK=1 MOBILE=1 node tests/browser.cjs
 node tests/storage-browser.cjs
 HTTP_FALLBACK=1 MOBILE=1 node tests/storage-browser.cjs
 TEST_HTTPS=1 node tests/storage-browser.cjs
 ```
+
+Der zusätzliche `review-browser`-Test prüft den CSV-Download mit einem echten CSV-Parser, getrennte Doppelzeichen, verschlüsselte Erinnerungseinstellungen und die Service-Worker-Benachrichtigung.
 
 Der HTTPS-Test benötigt zusätzlich `openssl` und simuliert einen lokalen TLS-Reverse-Proxy. Geprüft werden Migration, ein unabhängiges zweites Gerät, falsche Passwörter, Schreibkonflikte, Netzwerkausfälle, Backups mit anderem Passwort und ausschließlich verschlüsselte Speicherung. `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` passen Chromium-Datei bzw. Playwright-Modul an.
 
