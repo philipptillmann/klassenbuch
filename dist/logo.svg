@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Klassenbuch – offenes Buch mit Lesezeichen</title>
+  <rect width="512" height="512" rx="112" fill="#285e4d"/>
+  <path d="M128 160c46-16 86-10 128 15 42-25 82-31 128-15v194c-46-16-88-10-128 14-40-24-82-30-128-14Z" fill="#f7faf2"/>
+  <path d="M256 175v193" fill="none" stroke="#adc4a4" stroke-width="12"/>
+  <path d="m160 204 60 11m-60 34 60 11m-60 34 60 11m72-45 60-11m-60 56 60-11" fill="none" stroke="#86a17c" stroke-width="9" stroke-linecap="round"/>
+  <path d="M325 151c13-2 25-2 38 0v88l-19-12-19 12Z" fill="#d6c77d"/>
+</svg>

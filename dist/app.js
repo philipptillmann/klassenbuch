@@ -81,7 +81,7 @@ async function gate() {
     $('#retry').onclick = gate; return;
   }
   const exists = serverState.exists, legacy = localLegacy(), migrating = !exists && !!legacy;
-  $('#app').innerHTML = `<section class="lock panel"><div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div><span class="eyebrow">Verschlüsselt auf deinem Server</span>
+  $('#app').innerHTML = `<section class="lock panel"><div class="brand"><img class="brand-icon" src="logo.svg" alt="" width="36" height="36"> Klassenbuch<span style="color:#91a285">.</span></div><span class="eyebrow">Verschlüsselt auf deinem Server</span>
     <h1>${exists ? 'Schön, dass du da bist.' : migrating ? 'Dein Klassenbuch zieht um.' : 'Klassenbuch einrichten.'}</h1>
     <p>${exists ? 'Entsperre dein Klassenbuch mit deinem Passwort – auf jedem deiner Geräte.' : migrating ? 'Deine bisherigen Browserdaten werden nach dem Entsperren verschlüsselt auf den Server übertragen.' : 'Lege ein Passwort fest. Deine Daten werden im Browser verschlüsselt und auf deinem Server gespeichert.'}</p>
     <form id="unlock">${!exists ? '<label for="setup">Einrichtungsschlüssel vom Server</label><input id="setup" type="password" required autocomplete="off"><small>Auf dem Server: sudo cat /var/lib/klassenbuch/setup-token</small>' : ''}
@@ -157,7 +157,7 @@ function discardSession() { return !session || confirm('Diese ungespeicherte Stu
 function render() {
   Records.normalize(data);
   const menu = [['Übersicht', '◫'], ['Klassen & Kurse', '▦'], ['Stundenplan', '▤'], ['Jahresbilanz', '↗'], ['Noteneinträge', '▥'], ['Fehlzeiten', '◷'], ['Erinnerungen', '◴'], ['Datenschutz', '♧']];
-  $('#app').innerHTML = `<aside><div class="brand"><span class="logo">▤</span> Klassenbuch<span style="color:#91a285">.</span></div>
+  $('#app').innerHTML = `<aside><div class="brand"><img class="brand-icon" src="logo.svg" alt="" width="36" height="36"> Klassenbuch<span style="color:#91a285">.</span></div>
     <nav>${menu.map(([name, icon]) => `<button data-nav="${name}" class="${view === name ? 'active' : ''}"><span>${icon}</span>${name}</button>`).join('')}</nav>
     <footer><span class="badge">● Verschlüsselt auf dem Server</span><p>Dein Unterricht. Deine Daten.</p><button id="lock" class="textbtn">↪ Klassenbuch sperren</button></footer></aside>
     <main><header class="top"><span>Mein Arbeitsraum <span class="muted"> / ${esc(view)}</span></span><div class="row"><span class="badge">Schuljahr ${esc(data.year)}</span><button class="textbtn" id="lockTop">♧ Sperren</button></div></header><div id="content"></div></main>`;
@@ -524,4 +524,5 @@ function importBackup() {
   };
   input.click();
 }
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost','127.0.0.1','[::1]'].includes(location.hostname))) navigator.serviceWorker.register('reminder-sw.js').catch(() => {});
 gate();

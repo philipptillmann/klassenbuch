@@ -11,6 +11,8 @@ const {execFileSync}=require('node:child_process');
     await context.grantPermissions(['notifications'],{origin:backend.url});
     const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(backend.url);
+    assert.equal(await page.locator('link[rel=manifest]').getAttribute('href'),'manifest.webmanifest');
+    await page.locator('.brand-icon').first().evaluate(img=>img.decode());
     await page.getByLabel('Einrichtungsschlüssel vom Server').fill(backend.setup());
     await page.locator('#password').fill('Synthetic review password 2026');await page.locator('#confirm').fill('Synthetic review password 2026');
     await page.getByRole('button',{name:'Geschütztes Klassenbuch anlegen'}).click();

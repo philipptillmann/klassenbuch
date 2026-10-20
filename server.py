@@ -12,9 +12,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent
-ASSETS = {'index.html', 'app.js', 'records.js', 'exports.js', 'reminders.js', 'reminder-sw.js', 'style.css', 'sjcl.js', 'crypto-worker.js', 'SJCL-LICENSE.txt'}
+ASSETS = {'index.html', 'manifest.webmanifest', 'logo.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'app.js', 'records.js', 'exports.js', 'reminders.js', 'reminder-sw.js', 'style.css', 'sjcl.js', 'crypto-worker.js', 'SJCL-LICENSE.txt'}
 
 class Handler(SimpleHTTPRequestHandler):
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map, '.webmanifest': 'application/manifest+json'}
     def do_GET(self):
         path = unquote(urlsplit(self.path).path)
         if path.startswith('/api/'):

@@ -10,7 +10,7 @@ async function fetchMock(path, options={}) {
  }
  return {ok:true,json:async()=>({envelope:remoteEnvelope,revision})};
 }
-const ctx={fetch:fetchMock,getRemote:()=>JSON.stringify(remoteEnvelope),crypto,TextEncoder,TextDecoder,btoa,atob,location:{protocol:'http:',hostname:'server'},document:{querySelector:()=>el,addEventListener(){}},localStorage:{getItem:k=>stored[k],setItem:()=>{throw Error("Unexpected local storage write")}},setTimeout,clearTimeout,console};
+const ctx={navigator:{},fetch:fetchMock,getRemote:()=>JSON.stringify(remoteEnvelope),crypto,TextEncoder,TextDecoder,btoa,atob,location:{protocol:'http:',hostname:'server'},document:{querySelector:()=>el,addEventListener(){}},localStorage:{getItem:k=>stored[k],setItem:()=>{throw Error("Unexpected local storage write")}},setTimeout,clearTimeout,console};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/sjcl.js','utf8'),ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/records.js','utf8'),ctx);

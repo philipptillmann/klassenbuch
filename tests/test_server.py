@@ -2,6 +2,7 @@ import functools
 import base64
 import json
 import tempfile
+import struct
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -36,7 +37,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
             self.assertEqual(response.headers['X-Frame-Options'], 'DENY')
             self.assertIn("script-src 'self'", response.headers['Content-Security-Policy'])
-        for asset in ['app.js', 'records.js', 'exports.js', 'reminders.js', 'reminder-sw.js', 'sjcl.js', 'crypto-worker.js', 'style.css']:
+        for asset in ['manifest.webmanifest', 'logo.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'app.js', 'records.js', 'exports.js', 'reminders.js', 'reminder-sw.js', 'sjcl.js', 'crypto-worker.js', 'style.css']:
             with urllib.request.urlopen(self.origin + '/' + asset) as response:
                 self.assertEqual(response.status, 200)
 
@@ -52,6 +53,20 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urllib.request.urlopen(urllib.request.Request(self.origin, data=b'private data'))
         self.assertEqual(cm.exception.code, 404)
+
+    def test_pwa_manifest_and_icon_sizes(self):
+        with urllib.request.urlopen(self.origin + '/manifest.webmanifest') as response:
+            self.assertIn('application/manifest+json', response.headers['Content-Type'])
+            manifest = json.load(response)
+        self.assertEqual(manifest['name'], 'Klassenbuch')
+        self.assertEqual(manifest['display'], 'standalone')
+        self.assertEqual(manifest['start_url'], './')
+        self.assertTrue(any(icon['purpose'] == 'maskable' for icon in manifest['icons']))
+        for name, size in [('icon-192.png',192), ('icon-512.png',512), ('icon-maskable-512.png',512), ('apple-touch-icon.png',180)]:
+            with urllib.request.urlopen(self.origin + '/' + name) as response:
+                png = response.read()
+            self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+            self.assertEqual(struct.unpack('>II', png[16:24]), (size,size))
 
     def test_authenticated_ciphertext_api(self):
         token = base64.b64encode(b't' * 32).decode()

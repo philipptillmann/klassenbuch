@@ -110,6 +110,12 @@ Regelmäßig Backups exportieren und zusätzlich das Server-Datenverzeichnis sic
 
 Ein Datenbestand enthält ein Schuljahr. Die Schuljahrbezeichnung archiviert oder filtert keine Daten. Ein anderer Browser öffnet dasselbe Server-Klassenbuch. Frühere übersprungene Karten werden nicht automatisch zu Fehlzeiten. Historische Einträge entfernter Schüler bleiben bearbeitbar.
 
+## App-Logo und PWA
+
+Das Buchlogo ist als `logo.svg` (Oberfläche/Favicon) sowie als PNG in 192×192 und 512×512 verfügbar. Eine separate maskierbare 512×512-Version hat einen durchgehenden Hintergrund und hält das Buchmotiv im sicheren Bereich; für iOS ist ein 180×180-Apple-Touch-Icon enthalten. `manifest.webmanifest` verknüpft Name, Farben, Startadresse und Symbole für die Installation über das Browsermenü („App installieren“/„Zum Home-Bildschirm“).
+
+Die App verwendet dabei denselben HTTPS-Server und Passwortschutz. Es werden keine entschlüsselten Daten für Offline-Nutzung gecacht. Eine Installation allein aktiviert keinen Push bei geschlossener App; die Einschränkung aus Issue #16 bleibt bestehen. Die Icons lassen sich bei Bedarf mit `node scripts/generate-icons.cjs` aus dem SVG neu erzeugen (nur dafür Playwright/Chromium nötig).
+
 ## CSV-Export
 
 Unter **Datenschutz → Unverschlüsselte CSV exportieren** steht ein lesbarer Export des aktuellen Serverbestands bereit. Enthalten sind aktuelle Schülerlisten (auch ohne Bewertung), Mitarbeit mit Punktwerten, Kommentare, Fehlzeiten und sämtliche Schulnoten einschließlich vorläufiger und Halbjahresnoten. Historische Einträge entfernter Schüler bleiben enthalten. Der Wochenstundenplan und Erinnerungseinstellungen sind nicht Teil dieses Tabellenexports.
