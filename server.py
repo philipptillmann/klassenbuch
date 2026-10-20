@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Static UI and authenticated, opaque encrypted vault storage."""
-import argparse
 import json
 import os
 import sqlite3
+import socket
+from config import load_config
 from vault import Vault, VaultError
 import functools
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -103,15 +104,17 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--bind', default='0.0.0.0')
-    parser.add_argument('--port', type=int, default=8085)
-    parser.add_argument('--data-dir', default=os.environ.get('KLASSENBUCH_DATA_DIR', str(Path.home() / '.local/share/klassenbuch')))
-    args = parser.parse_args()
+    args = load_config()
     os.umask(0o077)
-    server = ThreadingHTTPServer((args.bind, args.port), functools.partial(Handler, directory=str(ROOT / 'dist')))
+    server_type = ThreadingHTTPServer
+    if ':' in args.bind:
+        class IPv6Server(ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+        server_type = IPv6Server
+    server = server_type((args.bind, args.port), functools.partial(Handler, directory=str(ROOT / 'dist')))
     server.vault = Vault(args.data_dir)
-    print(f'Klassenbuch läuft auf http://{args.bind}:{server.server_port}', flush=True)
+    host = f'[{args.bind}]' if ':' in args.bind else args.bind
+    print(f'Klassenbuch läuft auf http://{host}:{server.server_port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

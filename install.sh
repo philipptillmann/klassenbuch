@@ -7,6 +7,17 @@ for tool in python3 systemctl; do command -v "$tool" >/dev/null || { echo "Fehlt
 # These characters cannot safely be inserted into a systemd ExecStart path.
 [[ "$ROOT_DIR" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo 'Installationspfad darf nur Buchstaben, Ziffern, _, ., / und - enthalten.' >&2; exit 1; }
 as_root() { if [[ "$(id -u)" == 0 ]]; then "$@"; else sudo "$@"; fi; }
+# Local configuration is never overwritten, including during updates.
+python3 - <<'PYENV'
+from pathlib import Path
+from config import load_config
+try:
+    with Path('.env').open('x', encoding='utf-8') as output:
+        output.write(Path('.env.example').read_text(encoding='utf-8'))
+except FileExistsError:
+    pass
+load_config([], environ={})  # Fail before touching the service if settings are invalid.
+PYENV
 python3 -m unittest discover -s tests -p 'test_*.py'
 if command -v node >/dev/null; then node --check dist/app.js; node --check dist/records.js; node test.cjs; node tests/records.cjs; fi
 SERVICE_USER="$(id -un)"
@@ -23,7 +34,7 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$ROOT_DIR
-ExecStart=$(command -v python3) $ROOT_DIR/server.py --bind 0.0.0.0 --port 8085 --data-dir /var/lib/klassenbuch
+ExecStart=$(command -v python3) $ROOT_DIR/server.py --data-dir /var/lib/klassenbuch
 StateDirectory=klassenbuch
 StateDirectoryMode=0700
 ReadWritePaths=/var/lib/klassenbuch
@@ -44,9 +55,12 @@ as_root systemctl enable klassenbuch.service
 as_root systemctl restart klassenbuch.service
 python3 - <<'PY'
 import time, urllib.request
+from config import load_config
+health_url = load_config([], environ={}).health_url
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 for attempt in range(30):
     try:
-        with urllib.request.urlopen('http://127.0.0.1:8085/healthz', timeout=1) as r:
+        with opener.open(health_url, timeout=1) as r:
             if r.read() == b'klassenbuch ok\n': break
     except OSError: pass
     time.sleep(.25)

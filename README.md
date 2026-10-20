@@ -16,7 +16,29 @@ bash ~/klassenbuch/install.sh
 
 Der Installer richtet `klassenbuch.service` ein und aktiviert den Start beim Booten. Der Dienst läuft als der Benutzer, der `install.sh` aufgerufen hat. Code bleibt nur lesbar; `/var/lib/klassenbuch` ist das schreibbare, dauerhafte Datenverzeichnis und liegt außerhalb des Git-Checkouts. Updates löschen oder ersetzen es nicht. Ein bestehender Dienst gleichen Namens wird aktualisiert.
 
-Das Backend lauscht weiterhin auf Port 8085. **Die App über die HTTPS-Adresse des bestehenden Reverse-Proxys öffnen.** Außer auf localhost blockiert der Browser einen Serverzugriff über unverschlüsseltes HTTP. Der Proxy muss die gesamte App einschließlich `/api/` weiterleiten, die Header `Host` (mit Port, falls nötig), `Authorization`, `If-Match` und `X-Setup-Token` erhalten und darf API-Antworten nicht cachen. Für große Backups das Proxy-Uploadlimit auf mindestens 20 MiB setzen, z. B. `client_max_body_size 20m` bei nginx. Port 8085 sollte nur für den Proxy erreichbar sein. Der Installer ändert weder HTTPS, DNS noch Firewall.
+### Bind-Adresse und Port (.env)
+
+Beim ersten Installieren/Update wird eine fehlende `~/klassenbuch/.env` aus `.env.example` angelegt. Eine vorhandene Datei wird niemals überschrieben und bleibt beim Update erhalten. Beispiel:
+
+```dotenv
+# Keep loopback when using a reverse proxy on the same host.
+KLASSENBUCH_BIND=127.0.0.1
+KLASSENBUCH_PORT=8085
+```
+
+Den Port dort anpassen, z. B. auf `18085`, und den Dienst neu starten:
+
+```bash
+sudo systemctl restart klassenbuch
+```
+
+Den Upstream-Port des HTTPS-Reverse-Proxys ebenfalls anpassen. Standard ist jetzt Loopback (`127.0.0.1`), passend für einen Reverse-Proxy auf demselben Host. Wenn der Proxy von einem anderen Host/Container zugreift, eine passende erreichbare Bind-Adresse einstellen; `0.0.0.0` bindet alle IPv4-Schnittstellen. IPv6-Adressen wie `::1` und `::` sind ebenfalls möglich.
+
+Die `.env` wird relativ zum Installationsverzeichnis gelesen, unabhängig vom aktuellen Arbeitsverzeichnis. Werte werden als Daten gelesen und niemals als Shellcode ausgeführt; Kommentare und einfache/doppelte Anführungszeichen sind möglich. Für einen manuellen Start gilt: CLI-Argumente vor Prozessumgebung vor `.env` vor Standardwerten. Der systemd-Dienst liest die Datei direkt; Shell-Variablen des Benutzers beim Aufruf von `install.sh` werden nicht in den Dienst übernommen. Portwerte müssen zwischen 1 und 65535 liegen. `--port 0` ist nur für dynamische Testports vorgesehen.
+
+`.env` wird von Git ignoriert und nicht über HTTP ausgeliefert. `.env.example` enthält nur die Vorlage. Eine Registrierungsvariable ist nicht erforderlich: Klassenbuch verwendet ein gemeinsames verschlüsseltes Klassenbuch ohne zusätzliche Benutzerkonten.
+
+**Die App über die HTTPS-Adresse des bestehenden Reverse-Proxys öffnen.** Außer auf localhost blockiert der Browser einen Serverzugriff über unverschlüsseltes HTTP. Der Proxy muss die gesamte App einschließlich `/api/` weiterleiten, die Header `Host` (mit Port, falls nötig), `Authorization`, `If-Match` und `X-Setup-Token` erhalten und darf API-Antworten nicht cachen. Für große Backups das Proxy-Uploadlimit auf mindestens 20 MiB setzen, z. B. `client_max_body_size 20m` bei nginx. Der Backend-Port sollte nur für den Proxy erreichbar sein. Der Installer ändert weder HTTPS, DNS noch Firewall.
 
 ### Einmalige Einrichtung
 

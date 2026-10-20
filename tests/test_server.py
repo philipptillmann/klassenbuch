@@ -41,7 +41,7 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(response.status, 200)
 
     def test_repository_and_traversal_are_not_public(self):
-        for path in ['/README.md', '/.git/config', '/../server.py', '/%2e%2e/server.py', '/dist/', '/backup.json']:
+        for path in ['/README.md', '/.git/config', '/../server.py', '/%2e%2e/server.py', '/dist/', '/backup.json', '/.env', '/.env.example', '/config.py']:
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 urllib.request.urlopen(self.origin + path)
             self.assertEqual(cm.exception.code, 404)
