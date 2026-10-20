@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent
-ASSETS = {'index.html', 'app.js', 'style.css', 'sjcl.js', 'crypto-worker.js', 'SJCL-LICENSE.txt'}
+ASSETS = {'index.html', 'app.js', 'records.js', 'style.css', 'sjcl.js', 'crypto-worker.js', 'SJCL-LICENSE.txt'}
 
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):

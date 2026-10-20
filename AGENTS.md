@@ -6,4 +6,5 @@
 - Keine Passwörter, Schlüssel, Schülerdaten oder Backups ins Repository aufnehmen.
 - Datenformat `stundenbuch.v1` aus Kompatibilitätsgründen erhalten. Änderungen an Kryptografie mit Interoperabilitätstests absichern.
 - Server darf ausschließlich öffentliche App-Assets ausliefern. Kein Datenbank- oder Passwort-Endpunkt.
-- Vor Push: `node --check dist/app.js`, `node test.cjs`, `python3 -m unittest discover -s tests` und `bash -n install.sh update.sh`.
+- Vor Push: `node --check dist/app.js`, `node --check dist/records.js`, `node test.cjs`, `node tests/records.cjs`, `python3 -m unittest discover -s tests` und `bash -n install.sh update.sh`.
+- Bei Änderungen an Kartenbewertung, Fehlzeiten und Noten zusätzlich `tests/browser.cjs` mit Desktop und `HTTP_FALLBACK=1 MOBILE=1` prüfen, wenn Chromium/Playwright verfügbar sind.

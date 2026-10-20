@@ -5,14 +5,15 @@ let stored={};
 const ctx={crypto,TextEncoder,TextDecoder,btoa,atob,location:{protocol:'http:',hostname:'server'},document:{querySelector:()=>el,addEventListener(){}},localStorage:{getItem:k=>stored[k],setItem:(k,v)=>stored[k]=v},setTimeout,clearTimeout,console};
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/sjcl.js','utf8'),ctx);
+vm.runInContext(fs.readFileSync(__dirname+'/dist/records.js','utf8'),ctx);
 vm.runInContext(fs.readFileSync(__dirname+'/dist/app.js','utf8').replace(/gate\(\);\s*$/,''),ctx);
 vm.runInContext(`(async()=>{
  salt=crypto.getRandomValues(new Uint8Array(16));
  const password='Sicheres Testpasswort mit Umlauten äöü';
  key=await derive(password,salt);
- data={year:'2026/27',courses:[{id:'c',name:'8a',students:[{id:'s',name:'Geheimer Name'}]}],slots:[],lessons:[{course:'c',ratings:[{student:'s',value:2},{student:'s',value:-1}]}]};
+ data={year:'2026/27',courses:[{id:'c',name:'8a',students:[{id:'s',name:'Geheimer Name'}]}],slots:[],lessons:[{course:'c',ratings:[{student:'s',value:2,comment:'Vertraulicher Kommentar'},{student:'s',value:-1}],absences:[{student:'absent',name:'Testkind fehlt',status:'open'}]}],assessments:[{id:'grade',course:'c',kind:'test',date:'2026-10-20',title:'Testeintrag',grades:[{student:'s',grade:2,comment:'Geschützte Schulnote'}]}]};
  await save();const raw=localStorage.getItem(STORE),v=JSON.parse(raw);
- if(raw.includes('Geheimer Name'))throw Error('Klartext gespeichert');
+ if(['Geheimer Name','Vertraulicher Kommentar','Testkind fehlt','Geschützte Schulnote'].some(text=>raw.includes(text)))throw Error('Klartext gespeichert');
  const plain=JSON.parse(new TextDecoder().decode(await decrypt(key,un64(v.iv),un64(v.cipher))));
  if(plain.courses[0].students[0].name!=='Geheimer Name')throw Error('Roundtrip');
  if(avg('s','c')!=='0,50')throw Error('Schnitt');

@@ -1,0 +1,47 @@
+// Synthetic fixtures only. Run: node tests/records.cjs
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = vm.createContext({ assert, console });
+vm.runInContext(fs.readFileSync(__dirname + '/../dist/records.js', 'utf8'), context);
+vm.runInContext(`
+const old = {year:'2026/27', courses:[{id:'c',students:[{id:'a',name:'Testkind A'},{id:'b',name:'Testkind B'}]}], slots:[], lessons:[{id:'l',course:'c',date:'2026-10-20',ratings:[{student:'a',name:'Testkind A',value:2}]}]};
+Records.normalize(old);
+assert.equal(old.assessments.length,0);
+assert.equal(old.lessons[0].absences.length,0);
+assert.equal(Records.result(old.lessons[0],'b'),'skip');
+const lesson=old.lessons[0];
+Records.setResult(lesson,{id:'b',name:'Testkind B'},'-1','  Kommentar B  ');
+Records.setResult(lesson,{id:'a',name:'Testkind A'},'open','  Fehlt  ');
+assert.equal(lesson.ratings.length,1);
+assert.equal(lesson.ratings[0].student,'b');
+assert.equal(Records.mean(Records.ratings(old,'c','a').map(r=>r.value)),'–');
+assert.equal(Records.absences(old)[0].status,'open');
+assert.equal(Records.comment(lesson,'a'),'Fehlt');
+Records.setResult(lesson,{id:'a',name:'Testkind A'},'excused','Attest');
+assert.equal(Records.absences(old)[0].status,'excused');
+Records.setResult(lesson,{id:'a',name:'Testkind A'},'unexcused');
+assert.equal(Records.absences(old)[0].status,'unexcused');
+Records.setResult(lesson,{id:'a',name:'Testkind A'},'1','Nachtrag');
+assert.equal(lesson.absences.length,0);
+assert.equal(Records.mean(Records.ratings(old,'c','a').map(r=>r.value)),'1,00');
+assert.equal(Records.comment(lesson,'b'),'Kommentar B');
+assert.throws(()=>Records.setResult(lesson,{id:'a',name:'Testkind A'},'6'));
+assert.equal(Records.result(lesson,'a'),'1');
+Records.setResult(lesson,{id:'a',name:'Testkind A'},'skip');
+assert.equal(Records.result(lesson,'a'),'skip');
+assert.equal(Records.comment(lesson,'a'),'');
+old.courses[0].students=[];
+assert.equal(Records.roster(old,'c',lesson)[0].name,'Testkind B');
+function entry(id,kind,grade){return Records.assessment({id,course:'c',date:'2026-10-20',title:' Test ',kind,grades:[{student:'b',name:'Testkind B',grade,comment:' Notiz '}]})}
+old.assessments=[entry('t','test',2),entry('o','other',4),entry('p','provisional',1),entry('h','semester1',1),entry('h2','semester2',1)];
+assert.equal(Records.gradeMean(old,'c','b'),'3,00');
+assert.equal(old.assessments.filter(Records.isSummary).length,3);
+assert.equal(old.assessments[0].title,'Test');
+assert.equal(old.assessments[0].grades[0].comment,'Notiz');
+for(const grade of [0,7,1.5,NaN,'2']) assert.throws(()=>entry('invalid','test',grade));
+assert.throws(()=>entry('invalid','unknown',2));
+assert.throws(()=>Records.assessment({course:'c',date:'2026-10-20',title:'X',kind:'test',grades:[]}));
+assert.equal(Records.mean(Records.ratings(old,'c','b').map(r=>r.value)),'-1,00');
+console.log('PASS: legacy data, comments, editing isolation, attendance transitions, roster history, school-grade validation and separate averages');
+`, context);

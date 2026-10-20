@@ -41,9 +41,15 @@ python3 server.py --bind 0.0.0.0 --port 8085
 - Klassen/Kurse mit Fach und Schülerlisten anlegen und bearbeiten.
 - Wochenstundenplan mit Wochentag, Uhrzeit und Raum.
 - Eine neue Stunde mit Datum und Thema anlegen und alle Schüler als Karten durchgehen.
-- Bewertungen: **++ = 2, + = 1, 0 = 0, − = −1, — = −2**. Zurückgehen und Überspringen möglich.
-- Jahresbilanz mit Häufigkeiten, arithmetischem Punkteschnitt und Stundenverlauf. Übersprungene Schüler zählen nicht zum Schnitt. Der Schnitt ist keine Schulnote.
+- Bewertungen: **++ = 2, + = 1, 0 = 0, − = −1, — = −2**. Optionaler Kommentar direkt auf jeder Schülerkarte; Zurückgehen und Überspringen möglich.
+- Gespeicherte Stunden samt Datum, Thema, Kommentaren und Bewertungen nachträglich bearbeiten, auch für einzelne Schüler. Im Stundenverlauf der Jahresbilanz stehen dafür „Stunde bearbeiten“ und „Bewertung bearbeiten“.
+- „Abwesend vermerken“ erfasst eine offene Fehlzeit; „Ohne Eintrag überspringen“ erfasst keine Abwesenheit. Unter **Fehlzeiten** werden alle Kinder und Kurse angezeigt, offene Entschuldigungen zuerst nach Kind gruppiert. Der Status lässt sich später auf entschuldigt, unentschuldigt oder wieder offen setzen. Jede gespeicherte Unterrichtseinheit zählt als eine Fehlstunde.
+- Unter **Noteneinträge** Tests/Klassenarbeiten und weitere Leistungen mit Titel, Datum, individuellen Schulnoten (ganze Zahlen 1–6) und optionalen Kommentaren erfassen. Die Einträge und einzelne Schülernoten sind nachträglich bearbeitbar.
+- Vorläufige Noten sowie Halbjahresnoten für das erste oder zweite Halbjahr werden in **Noteneinträge** und **Jahresbilanz** in einem eigenen hervorgehobenen Bereich angezeigt.
+- Jahresbilanz mit Häufigkeiten, arithmetischem Punkteschnitt, Fehlstunden und Stundenverlauf einschließlich Kommentaren. Abwesende und übersprungene Schüler zählen nicht zum Mitarbeitsschnitt. Schulnoten aus Tests/weiteren Leistungen haben einen separaten ungewichteten Durchschnitt; vorläufige und Halbjahresnoten fließen in keinen Durchschnitt ein. Es wird keine automatische Gesamtnote berechnet.
 - Passwortsperre, automatische Sperre nach fünf Minuten ohne Eingabe, verschlüsselte Backups.
+
+Vorhandene Daten und alte Backups werden beim Entsperren kompatibel ergänzt. Früher übersprungene Karten werden **nicht** als Fehlzeiten nachgetragen, da der bisherige Prototyp Abwesenheit und Überspringen nicht getrennt hat. Historische Bewertungen und Fehlzeiten bleiben auch nach dem Entfernen eines Schülers aus der aktuellen Kursliste bearbeitbar.
 
 Ein Datenbestand enthält ein Schuljahr. Eine Änderung der Schuljahrbezeichnung filtert oder archiviert keine Daten. Für ein neues Schuljahr zuerst ein Backup sichern und einen getrennten Browserbereich verwenden.
 
@@ -51,7 +57,7 @@ Ein Datenbestand enthält ein Schuljahr. Eine Änderung der Schuljahrbezeichnung
 
 **Die Daten liegen verschlüsselt im Browser, nicht auf dem Server.** Es gibt keine Konten, Serverdatenbank oder automatische Synchronisierung. Ein anderer Browser, ein anderes Gerät oder eine andere URL/Port/Protokoll-Kombination hat einen eigenen Speicher. Für einen Umzug zuerst das Backup unter „Datenschutz“ exportieren und am neuen Ort importieren. Alte Stundenbuch-Backups bleiben kompatibel; der interne Speicherschlüssel `stundenbuch.v1` bleibt erhalten.
 
-Beim ersten Start ein Passwort mit mindestens zwölf Zeichen festlegen. Alle Fachdaten werden gemeinsam mit AES-256-GCM und 128-Bit-Authentifizierungstag verschlüsselt. Schlüsselableitung: PBKDF2-HMAC-SHA-256, 600.000 Iterationen, zufälliges 16-Byte-Salt. Jede Speicherung verwendet einen neuen zufälligen 12-Byte-IV. Zufallswerte kommen ausschließlich aus `crypto.getRandomValues`. Passwort und Schlüssel werden nicht dauerhaft gespeichert. Ohne Passwort gibt es keine Wiederherstellung. Browserdaten löschen bedeutet ohne Backup Datenverlust. Noch nicht gespeicherte Kartenbewertungen liegen nur im Arbeitsspeicher.
+Beim ersten Start ein Passwort mit mindestens zwölf Zeichen festlegen. Alle Fachdaten einschließlich Kommentare, Fehlzeiten, Schulnoten und Bilanznoten werden gemeinsam mit AES-256-GCM und 128-Bit-Authentifizierungstag verschlüsselt. Schlüsselableitung: PBKDF2-HMAC-SHA-256, 600.000 Iterationen, zufälliges 16-Byte-Salt. Jede Speicherung verwendet einen neuen zufälligen 12-Byte-IV. Zufallswerte kommen ausschließlich aus `crypto.getRandomValues`. Passwort und Schlüssel werden nicht dauerhaft gespeichert. Ohne Passwort gibt es keine Wiederherstellung. Browserdaten löschen bedeutet ohne Backup Datenverlust. Noch nicht gespeicherte Kartenbewertungen liegen nur im Arbeitsspeicher.
 
 Unter HTTPS/localhost wird native Web Crypto verwendet. Auf der gewünschten HTTP-LAN-Adresse wird dieselbe Kryptografie durch die lokal mitgelieferte SJCL-Bibliothek umgesetzt. Die langsamere Passwortableitung läuft in einem Worker. Es gibt keine CDN-, Schrift- oder sonstigen externen Laufzeitabfragen.
 
@@ -61,14 +67,29 @@ Unter HTTPS/localhost wird native Web Crypto verwendet. Auf der gewünschten HTT
 
 ```bash
 node --check dist/app.js
+node --check dist/records.js
 node test.cjs
+node tests/records.cjs
 python3 -m unittest discover -s tests
 bash -n install.sh update.sh
 ```
 
 Geprüft werden verschlüsselte Speicherung, Ablehnung falscher Passwörter und manipulierter Daten, Formatkompatibilität zwischen HTTP-Fallback und Web Crypto, neue IVs und Schnittberechnung. HTTP-Integrationstests prüfen Assets, Sicherheitsheader, Healthcheck und den Ausschluss von Repository-/Backup-Dateien. Das Installationsskript führt Python-Tests und, wenn Node vorhanden ist, die Kryptografietests aus.
 
-Die systemd-Installation muss auf dem Zielserver erfolgen. Sie wurde in der Entwicklungsumgebung ohne systemd nicht ausgeführt; ein vollständiger Browser-End-to-End-Test steht aus.
+Die systemd-Installation muss auf dem Zielserver erfolgen. Sie wurde in der Entwicklungsumgebung ohne systemd nicht ausgeführt. Die Feedback-Funktionen wurden in Chromium durchgängig auf Desktop und in mobiler Ansicht geprüft, zusätzlich mit erzwungenem HTTP-Kryptografiefallback. Dabei wurden auch Verschlüsselung nach Neuladen und das Öffnen alter Daten getestet.
+
+Optionaler Browser-Regressionstest mit synthetischen Daten in einem getrennten Browserkontext (benötigt Playwright und Chromium, nicht für den Serverbetrieb nötig):
+
+```bash
+# In einem Terminal:
+python3 server.py --bind 127.0.0.1 --port 8765
+
+# In einem anderen Terminal, wenn Playwright und Chromium vorhanden sind:
+node tests/browser.cjs
+HTTP_FALLBACK=1 MOBILE=1 node tests/browser.cjs
+```
+
+Über `TEST_URL`, `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` können URL, Chromium-Datei und das Playwright-Modul angepasst werden. Die zusätzlichen Modelltests prüfen Kommentaränderungen, individuelle Korrekturen, Anwesenheitswechsel, historische Schüler und die Trennung der Notenskalen.
 
 ## Feature Requests
 

@@ -8,7 +8,7 @@ for tool in python3 systemctl; do command -v "$tool" >/dev/null || { echo "Fehlt
 [[ "$ROOT_DIR" =~ ^/[a-zA-Z0-9_./-]+$ ]] || { echo 'Installationspfad darf nur Buchstaben, Ziffern, _, ., / und - enthalten.' >&2; exit 1; }
 as_root() { if [[ "$(id -u)" == 0 ]]; then "$@"; else sudo "$@"; fi; }
 python3 -m unittest discover -s tests -p 'test_*.py'
-if command -v node >/dev/null; then node --check dist/app.js; node test.cjs; fi
+if command -v node >/dev/null; then node --check dist/app.js; node --check dist/records.js; node test.cjs; node tests/records.cjs; fi
 SERVICE_USER="$(id -un)"
 SERVICE_GROUP="$(id -gn)"
 SERVICE_FILE="$(mktemp)"
