@@ -15,7 +15,7 @@ const {startServer} = require('./browser_helpers.cjs');
     const errors=[],writes=[];
     for(const p of [page,other]){
       p.on('pageerror',e=>errors.push(e.message));
-      p.on('request',r=>{if(['POST','PUT'].includes(r.method()))writes.push(r.postData());});
+      p.on('request',r=>{if(['POST','PUT'].includes(r.method()) && r.url().endsWith('/api/vault'))writes.push(r.postData());});
     }
     const password='Synthetic migration password 2026';
     await page.goto(backend.url);
@@ -105,7 +105,8 @@ const {startServer} = require('./browser_helpers.cjs');
     await page.locator('[data-nav="Jahresbilanz"]').click();
     assert.equal(await page.evaluate(()=>data.year),'2030/31');
     for(const body of writes){
-      assert.deepEqual(Object.keys(JSON.parse(body)),['envelope']);
+      assert.deepEqual(Object.keys(JSON.parse(body)),['envelope','reminderTimes']);
+      assert.ok(JSON.parse(body).reminderTimes.every(Number.isInteger));
       for(const secret of [password,'Synthetic child','Synthetic lesson','Synthetic legacy course'])assert.equal(body.includes(secret),false);
     }
     const disk=fs.readFileSync(path.join(backend.directory,'vault.sqlite3'));

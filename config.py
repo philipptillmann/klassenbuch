@@ -6,7 +6,7 @@ from pathlib import Path
 import shlex
 
 ROOT = Path(__file__).resolve().parent
-KEYS = {'KLASSENBUCH_BIND', 'KLASSENBUCH_PORT'}
+KEYS = {'KLASSENBUCH_BIND', 'KLASSENBUCH_PORT', 'KLASSENBUCH_PUSH_ENABLED', 'KLASSENBUCH_PUSH_SUBJECT'}
 
 
 def read_env(path):
@@ -40,6 +40,8 @@ class Config:
     bind: str
     port: int
     data_dir: str
+    push_enabled: bool = True
+    push_subject: str = 'https://github.com/philipptillmann/klassenbuch'
 
     @property
     def health_url(self):
@@ -70,4 +72,12 @@ def load_config(argv=None, environ=None, env_path=None):
         parser.error('KLASSENBUCH_PORT: ganze Zahl von 1 bis 65535 erforderlich')
     if not 1 <= port <= 65535 and not (args.port == 0):
         parser.error('Port muss zwischen 1 und 65535 liegen (CLI --port 0 nur für Tests)')
-    return Config(bind, port, args.data_dir)
+    enabled = settings.get('KLASSENBUCH_PUSH_ENABLED', 'true').lower()
+    if enabled not in ('true','false'): parser.error('KLASSENBUCH_PUSH_ENABLED muss true oder false sein')
+    subject = settings.get('KLASSENBUCH_PUSH_SUBJECT', 'https://github.com/philipptillmann/klassenbuch')
+    from urllib.parse import urlsplit
+    try: uri = urlsplit(subject)
+    except ValueError: parser.error('KLASSENBUCH_PUSH_SUBJECT: ungültige Kontaktadresse')
+    if len(subject)>256 or any(c.isspace() for c in subject) or not ((uri.scheme=='https' and uri.netloc) or (uri.scheme=='mailto' and '@' in uri.path)):
+        parser.error('KLASSENBUCH_PUSH_SUBJECT muss eine HTTPS- oder mailto-Kontaktadresse sein')
+    return Config(bind, port, args.data_dir, enabled=='true', subject)

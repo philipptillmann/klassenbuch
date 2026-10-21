@@ -30,12 +30,12 @@ async function deriveAuth(password, saltBytes) {
 }
 function headers() { return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }; }
 async function readVault() { return api('/api/vault', { headers: headers() }); }
-async function persist(envelope) {
+async function persist(envelope, source = data) {
   const creating = !serverState.exists;
   const result = await api('/api/vault', {
     method: creating ? 'POST' : 'PUT',
     headers: { ...headers(), ...(creating ? { 'X-Setup-Token': setupToken } : { 'If-Match': String(serverState.revision) }) },
-    body: JSON.stringify({ envelope }),
+    body: JSON.stringify({ envelope, reminderTimes: Reminders.upcoming(source) }),
   });
   serverState = { exists: true, salt: envelope.salt, revision: result.revision };
   lastEnvelope = envelope;
@@ -46,7 +46,7 @@ function save() {
   const job = queue.then(async () => {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const cipher = await encrypt(k, iv, new TextEncoder().encode(snapshot));
-    await persist({ v: 1, salt: b64(s), iv: b64(iv), cipher: b64(cipher) });
+    await persist({ v: 1, salt: b64(s), iv: b64(iv), cipher: b64(cipher) }, JSON.parse(snapshot));
   });
   queue = job.catch(() => {});
   return job;
@@ -126,7 +126,7 @@ async function gate() {
           await save();
         }
       }
-      $('#password').value = ''; resetTimer(); render();
+      $('#password').value = ''; await restorePushOnDevice(); resetTimer(); render();
     } catch (error) {
       key = null; salt = null; authToken = null; data = null;
       $('#error').textContent = exists ? `Entsperren fehlgeschlagen. Passwort und Verbindung prüfen. ${error.message}` : `Einrichtung fehlgeschlagen: ${error.message}`;
@@ -135,7 +135,7 @@ async function gate() {
 }
 function resetTimer() { clearTimeout(timer); if (key) timer = setTimeout(lock, 300000); }
 async function lock() {
-  stopReminders(); $('#modal').close(); $('#modal').innerHTML = ''; await queue;
+  stopReminders(); pushDeviceActive=false; pushDeviceSubscription=null; $('#modal').close(); $('#modal').innerHTML = ''; await queue;
   key = null; salt = null; authToken = null; setupToken = ''; lastEnvelope = null; data = null; session = null;
   clearTimeout(timer); await gate();
 }
@@ -424,6 +424,61 @@ function lessonHTML(lesson) {
   }).join('')}</tbody></table></div></details>`;
 }
 
+let pushDeviceActive=false,pushDeviceSubscription=null,pushServerConfig=null,pushStatusMessage='';
+function pushKeyMatches(subscription) {
+  const key=subscription.options?.applicationServerKey;
+  return !key || b64(new Uint8Array(key)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_')===pushServerConfig.publicKey;
+}
+function pushOptions(method,body) {return {method,headers:headers(),body:JSON.stringify(body)};}
+async function restorePushOnDevice() {
+  pushDeviceActive=false;pushDeviceSubscription=null;pushStatusMessage='';
+  try {
+    pushServerConfig=await api('/api/push/config',{headers:headers()});
+    if(!pushServerConfig.available)return;
+    pushServerConfig=await api('/api/push/plan',pushOptions('PUT',{times:Reminders.upcoming(data),revision:serverState.revision}));
+    if(!('serviceWorker' in navigator) || !('PushManager' in globalThis))return;
+    const registration=await navigator.serviceWorker.getRegistration();
+    const subscription=registration?await registration.pushManager.getSubscription():null;
+    if(subscription){
+      if(!pushKeyMatches(subscription)){pushStatusMessage='Der Versandschlüssel hat sich geändert. Hintergrund-Push bitte erneut aktivieren.';return;}
+      await api('/api/push/subscribe',pushOptions('POST',{subscription:subscription.toJSON()}));
+      pushDeviceSubscription=subscription;pushDeviceActive=true;
+    }
+  }catch(error){pushStatusMessage=error.message;}
+}
+async function enableBackgroundPush() {
+  const button=$('#enable-background');button.disabled=true;
+  try {
+    if(Notification.permission!=='granted' && await Notification.requestPermission()!=='granted')throw Error('Bitte Benachrichtigungen im Browser erlauben.');
+    const registration=await navigator.serviceWorker.register('reminder-sw.js');
+    const ready=await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('Push-Dienst nicht bereit')),5000))]);
+    if(!pushServerConfig?.available)throw Error('Hintergrund-Push ist auf dem Server nicht verfügbar.');
+    let subscription=await ready.pushManager.getSubscription();
+    if(subscription && !pushKeyMatches(subscription)){await subscription.unsubscribe();subscription=null;}
+    if(!subscription)subscription=await ready.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:un64(pushServerConfig.publicKey.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-pushServerConfig.publicKey.length%4)%4))});
+    pushServerConfig=await api('/api/push/plan',pushOptions('PUT',{times:Reminders.upcoming(data),revision:serverState.revision}));
+    await api('/api/push/subscribe',pushOptions('POST',{subscription:subscription.toJSON()}));
+    pushDeviceSubscription=subscription;pushDeviceActive=true;pushStatusMessage='';
+    stopReminders();remindersView();toast('Hintergrund-Push für dieses Gerät aktiviert.');
+  }catch(error){pushStatusMessage=error.message;remindersView();toast(error.message);}
+}
+async function disableBackgroundPush() {
+  try {
+    const registration=await navigator.serviceWorker.getRegistration();
+    const subscription=pushDeviceSubscription || (registration?await registration.pushManager.getSubscription():null);
+    if(subscription){
+      await api('/api/push/unsubscribe',pushOptions('POST',{endpoint:subscription.endpoint}));
+      await subscription.unsubscribe();
+    }
+    pushDeviceActive=false;pushDeviceSubscription=null;pushStatusMessage='';startReminders();remindersView();
+  }catch(error){toast(error.message);}
+}
+async function testBackgroundPush() {
+  try {
+    await api('/api/push/test',pushOptions('POST',{endpoint:pushDeviceSubscription.endpoint}));
+    toast('Testnachricht vom Push-Dienst angenommen. Die Zustellung kann kurz dauern.');
+  }catch(error){toast(error.message);}
+}
 let reminderInterval=null,reminderLastCheck=0,reminderSeen=new Set(),reminderChecking=false;
 function stopReminders() {
   if(reminderInterval) clearInterval(reminderInterval);
@@ -452,7 +507,7 @@ async function checkReminders(now=new Date()) {
   finally {reminderChecking=false;}
 }
 function startReminders() {
-  if(!key || !Reminders.settings(data.reminders).enabled || typeof Notification==='undefined' || Notification.permission!=='granted') {
+  if(pushDeviceActive || !key || !Reminders.settings(data.reminders).enabled || typeof Notification==='undefined' || Notification.permission!=='granted') {
     stopReminders();return;
   }
   if(reminderInterval) return;
@@ -465,13 +520,16 @@ function remindersView() {
   const permission=typeof Notification==='undefined'?'unsupported':Notification.permission;
   const label={granted:'Erlaubt',denied:'Blockiert – bitte in den Browser-Einstellungen ändern',default:'Noch nicht erlaubt',unsupported:'Von diesem Browser nicht unterstützt'}[permission];
   $('#content').innerHTML=`<span class="eyebrow">Noten rechtzeitig festhalten</span><h1>Erinnerungen</h1>
-    <section class="panel"><h2>Erinnerung anhand deines Stundenplans</h2><p>Benachrichtigungen funktionieren derzeit, solange Klassenbuch geöffnet und entsperrt bleibt. Bei geschlossener oder gesperrter App werden keine Erinnerungen ausgelöst. Browser und Betriebssystem können Hintergrund-Tabs verzögern.</p>
+    <section class="panel"><h2>Erinnerung anhand deines Stundenplans</h2><p>Hintergrund-Push kann auch bei geschlossener oder gesperrter App erinnern. Dafür dieses Gerät einmal anmelden. Ohne Hintergrund-Push bleibt die Erinnerung auf die geöffnete und entsperrte App beschränkt.</p><p><strong>Hintergrund-Push auf diesem Gerät: ${pushDeviceActive?'Angemeldet':pushServerConfig?.available?'Nicht angemeldet':'Auf dem Server nicht verfügbar'}</strong></p>${(pushStatusMessage||pushServerConfig?.error)?`<p class="error">${esc(pushStatusMessage||pushServerConfig.error)}</p>`:''}<div class="row"><button id="enable-background" ${!pushServerConfig?.available || !('serviceWorker' in navigator) || !('PushManager' in globalThis)?'disabled':''}>Hintergrund-Push aktivieren</button><button id="disable-background" ${!pushDeviceActive?'disabled':''}>Dieses Gerät abmelden</button><button id="test-background" ${!pushDeviceActive?'disabled':''}>Hintergrund-Push testen</button></div><p><small>Für Hintergrund-Push speichert der Server Erinnerungstermine ohne Namen/Kursinhalte sowie dieses Push-Abonnement. Der Schlüssel für die Klassenbuchdaten wird nicht übertragen. Termine werden ein Jahr im Voraus geplant und beim Öffnen sowie bei Änderungen erneuert. Auf iPhone/iPad muss die App dafür zum Home-Bildschirm hinzugefügt sein. Browser/Betriebssystem müssen Web Push erlauben; Zustellung kann verzögert sein.</small></p>
     <p>Benachrichtigungen auf diesem Gerät: <strong>${esc(label)}</strong></p><div class="row"><button id="allow-notifications" ${['denied','unsupported'].includes(permission)?'disabled':''}>Benachrichtigungen erlauben</button><button id="test-notification" ${permission!=='granted'?'disabled':''}>Testbenachrichtigung</button></div>
     <form id="reminder-form"><label for="reminder-enabled">Erinnerungen</label><select id="reminder-enabled" name="enabled"><option value="false" ${!config.enabled?'selected':''}>Aus</option><option value="true" ${config.enabled?'selected':''}>Ein</option></select>
     <label for="reminder-mode">Wann erinnern?</label><select id="reminder-mode" name="mode"><option value="after" ${config.mode==='after'?'selected':''}>Nach jeder Unterrichtsstunde</option><option value="daily" ${config.mode==='daily'?'selected':''}>Einmal täglich an Unterrichtstagen</option></select>
     <div class="form-grid"><div><label for="reminder-delay">Nach Stundenende</label><select id="reminder-delay" name="delay">${[0,5,10,15].map(n=>`<option value="${n}" ${config.delay===n?'selected':''}>${n} Minuten</option>`).join('')}</select></div><div><label for="reminder-time">Tägliche Uhrzeit</label><input id="reminder-time" name="time" type="time" value="${esc(config.time)}" required></div></div>
-    <p><small>Das Stundenende ergibt sich aus Beginn + Dauer im Stundenplan (bisherige Stunden: 45 Minuten). Uhrzeiten gelten in der lokalen Zeitzone dieses Geräts. Verspätungen bis fünf Minuten werden nachgeholt, ältere Erinnerungen nicht. Gleichzeitige Stunden lösen eine gemeinsame Nachricht aus.</small></p><p><small>Die Einstellungen werden verschlüsselt auf dem Server gespeichert. Die Browser-Berechtigung muss auf jedem Gerät separat erteilt werden. Der Stundenplan und die Erinnerungstermine bleiben verschlüsselt; die Benachrichtigung nennt keine Schüler oder Kurse.</small></p>
+    <p><small>Das Stundenende ergibt sich aus Beginn + Dauer im Stundenplan (bisherige Stunden: 45 Minuten). Uhrzeiten gelten in der lokalen Zeitzone dieses Geräts. Verspätungen bis fünf Minuten werden nachgeholt, ältere Erinnerungen nicht. Gleichzeitige Stunden lösen eine gemeinsame Nachricht aus.</small></p><p><small>Die Einstellungen werden verschlüsselt auf dem Server gespeichert. Die Browser-Berechtigung muss auf jedem Gerät separat erteilt werden. Der Stundenplan bleibt verschlüsselt. Die freigegebenen Erinnerungstermine sind für den Server lesbar; die Nachricht nennt keine Schüler oder Kurse.</small></p>
     <button class="primary" type="submit">Erinnerungen speichern</button></form></section>`;
+  $('#enable-background').onclick=enableBackgroundPush;
+  $('#disable-background').onclick=disableBackgroundPush;
+  $('#test-background').onclick=testBackgroundPush;
   $('#allow-notifications').onclick=async()=>{try{await Notification.requestPermission();startReminders();remindersView();}catch(error){toast(error.message);}};
   $('#test-notification').onclick=()=>notification('Test: Klassenbuch-Erinnerungen sind auf diesem Gerät erlaubt.').catch(error=>toast(error.message));
   $('#reminder-form').onsubmit=async event=>{
@@ -517,7 +575,7 @@ function importBackup() {
         key = opened.key; salt = opened.salt; data = opened.contents;
         authToken = await deriveAuth(password, salt);
         await persist(envelope);
-        resetTimer(); render();
+        await restorePushOnDevice(); resetTimer(); render();
       }
       toast('Backup auf dem Server gespeichert.');
     } catch (error) { toast('Import fehlgeschlagen: ' + error.message); }

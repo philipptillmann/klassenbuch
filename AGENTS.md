@@ -11,4 +11,4 @@
 
 - Bei Änderungen am Serverspeicher oder Zugriffsschutz zusätzlich `tests/storage-browser.cjs` (auch `TEST_HTTPS=1` und `HTTP_FALLBACK=1 MOBILE=1`) ausführen. Tests nutzen ausschließlich temporäre isolierte Server.
 
-- Issue #16 bleibt für Push bei geschlossener/gesperrter App offen. Keine unverschlüsselten Stundenplan-/Erinnerungsmetadaten oder Entschlüsselungsschlüssel auf dem Server hinzufügen, ohne diese Architekturentscheidung zu klären.
+- Freigabe zu #16 am 21.10.2026: Reine Erinnerungstermine und gerätespezifische Push-Abonnements dürfen auf dem Server liegen. Namen, Kursinhalte, Passwort und Entschlüsselungsschlüssel bleiben ausschließlich im verschlüsselten Bestand bzw. im Browser-RAM.

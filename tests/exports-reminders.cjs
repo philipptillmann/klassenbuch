@@ -34,3 +34,12 @@ assert.equal(Reminders.due(data,new Date(2026,9,20,0,30)).length,0);
 assert.throws(()=>Reminders.validate({enabled:true,mode:'daily',delay:6,time:'16:00'}));
 assert.throws(()=>Reminders.validate({enabled:true,mode:'daily',delay:5,time:'25:00'}));
 console.log('PASS: CSV plaintext/escaping/formula protection, delay choices, daily/weekdays, deduplication, midnight and expiry');
+
+data.slots=[{id:'slot',course:'c',day:0,time:'09:00',duration:45}];
+data.reminders={enabled:true,mode:'after',delay:5,time:'16:00'};
+const horizon=Reminders.upcoming(data,new Date(2026,9,19,0,0),14);
+assert.ok(horizon.includes(Math.floor(new Date(2026,9,19,9,50).getTime()/1000)));
+assert.ok(horizon.includes(Math.floor(new Date(2026,9,26,9,50).getTime()/1000)));
+assert.ok(horizon.every(Number.isInteger));assert.equal(new Set(horizon).size,horizon.length);
+data.reminders.enabled=false;assert.equal(Reminders.upcoming(data).length,0);
+console.log('PASS: background UTC horizon, next-week local time and disabled-plan removal');

@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server import Handler, ROOT
+from push_service import PushService
 from vault import Vault
 
 class ServerTests(unittest.TestCase):
@@ -92,5 +93,30 @@ class ServerTests(unittest.TestCase):
         for path in ['/vault.sqlite3', '/setup-token', '/vault.py']:
             with self.assertRaises(urllib.error.HTTPError) as cm: urllib.request.urlopen(self.origin + path)
             self.assertEqual(cm.exception.code, 404)
+
+    def test_push_api_requires_auth_and_accepts_only_approved_metadata(self):
+        import time
+        token=base64.b64encode(b't'*32).decode()
+        self.server.push=PushService(self.server.vault,enabled=False,sender=lambda sub:None)
+        self.server.push.available=True
+        origin=self.origin
+        def request(path, body=None, method=None, authorized=True):
+            headers={'Content-Type':'application/json','Origin':origin}
+            if authorized:headers['Authorization']='Bearer '+token
+            return urllib.request.urlopen(urllib.request.Request(origin+path,data=None if body is None else json.dumps(body).encode(),headers=headers,method=method))
+        with self.assertRaises(urllib.error.HTTPError) as cm:request('/api/push/config',authorized=False)
+        self.assertEqual(cm.exception.code,401)
+        with request('/api/push/config') as r:self.assertTrue(json.load(r)['available'])
+        subscription={'endpoint':'https://updates.push.services.mozilla.com/wpush/v2/test','keys':{'p256dh':base64.urlsafe_b64encode(b'\x04'+b'A'*64).decode().rstrip('='),'auth':base64.urlsafe_b64encode(b'B'*16).decode().rstrip('=')}}
+        with request('/api/push/subscribe',{'subscription':subscription},'POST') as r:self.assertIn('deviceId',json.load(r))
+        revision=self.server.vault.status()['revision']
+        with request('/api/push/plan',{'times':[int(time.time())+60],'revision':revision},'PUT') as r:self.assertGreater(json.load(r)['plannedUntil'],0)
+        with self.assertRaises(urllib.error.HTTPError) as cm:request('/api/push/plan',{'times':[],'revision':0},'PUT')
+        self.assertEqual(cm.exception.code,409)
+        with self.assertRaises(urllib.error.HTTPError) as cm:request('/api/push/plan',{'times':[],'revision':revision,'student':'not allowed'},'PUT')
+        self.assertEqual(cm.exception.code,400)
+        with request('/api/push/test',{'endpoint':subscription['endpoint']},'POST') as r:self.assertTrue(json.load(r)['accepted'])
+        with request('/api/push/unsubscribe',{'endpoint':subscription['endpoint']},'POST') as r:self.assertTrue(json.load(r)['removed'])
+        with self.server.vault.connect() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM push_devices').fetchone()[0],0)
 
 if __name__ == '__main__': unittest.main()

@@ -42,6 +42,13 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.config()
 
+    def test_push_environment_settings(self):
+        self.path.write_text('KLASSENBUCH_PUSH_ENABLED=false\nKLASSENBUCH_PUSH_SUBJECT=mailto:test@example.org\n')
+        self.assertFalse(self.config().push_enabled)
+        self.assertEqual(self.config().push_subject,'mailto:test@example.org')
+        self.path.write_text('KLASSENBUCH_PUSH_ENABLED=maybe\n')
+        with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):self.config()
+
     def test_shell_expressions_are_never_executed(self):
         marker = Path(self.temp.name) / 'must-not-exist'
         self.path.write_text(f'KLASSENBUCH_BIND="$(touch {marker})"\n')
@@ -52,7 +59,7 @@ class ConfigTests(unittest.TestCase):
         checkout = Path(self.temp.name) / 'app'
         checkout.mkdir()
         root = Path(__file__).resolve().parents[1]
-        for filename in ['server.py', 'vault.py', 'config.py']:
+        for filename in ['server.py', 'vault.py', 'config.py', 'push_service.py']:
             shutil.copyfile(root / filename, checkout / filename)
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))

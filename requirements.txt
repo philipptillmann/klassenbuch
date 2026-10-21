@@ -1,0 +1,3 @@
+# Web Push transport and VAPID; the encrypted vault never uses these keys.
+pywebpush==2.5.0; python_version >= '3.10'
+pywebpush==2.1.2; python_version < '3.10'

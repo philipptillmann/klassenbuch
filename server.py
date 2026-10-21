@@ -6,6 +6,7 @@ import sqlite3
 import socket
 from config import load_config
 from vault import Vault, VaultError
+from push_service import PushService
 import functools
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -65,7 +66,12 @@ class Handler(SimpleHTTPRequestHandler):
             if method == 'GET' and path == '/api/vault':
                 self.json_response(200, vault.read(token))
                 return
-            if method not in ('POST', 'PUT') or path != '/api/vault':
+            if path.startswith('/api/push/'):
+                vault.read(token)
+                if not hasattr(self.server,'push'): raise VaultError(503,'Push-Dienst nicht eingerichtet')
+                if method=='GET' and path=='/api/push/config':
+                    self.json_response(200,self.server.push.config());return
+            if method not in ('POST', 'PUT') or path not in ('/api/vault','/api/push/subscribe','/api/push/unsubscribe','/api/push/plan','/api/push/test'):
                 raise VaultError(404, 'Nicht gefunden')
             origin = self.headers.get('Origin')
             if origin and urlsplit(origin).netloc != self.headers.get('Host'):
@@ -82,13 +88,26 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length))
             except (ValueError, UnicodeError):
                 raise VaultError(400, 'Ungültiges JSON')
-            if not isinstance(payload, dict) or set(payload) != {'envelope'}:
-                raise VaultError(400, 'Nur verschlüsselte Daten erlaubt')
+            if path.startswith('/api/push/'):
+                if not isinstance(payload,dict): raise VaultError(400,'Ungültige Push-Anfrage')
+                push=self.server.push
+                if path=='/api/push/subscribe' and method=='POST' and set(payload)=={'subscription'}:
+                    result=push.subscribe(payload['subscription'])
+                elif path=='/api/push/unsubscribe' and method=='POST' and set(payload)=={'endpoint'}:
+                    result=push.unsubscribe(payload['endpoint'])
+                elif path=='/api/push/plan' and method=='PUT' and set(payload)=={'times','revision'}:
+                    result=push.plan(payload['times'],payload['revision'])
+                elif path=='/api/push/test' and method=='POST' and set(payload)=={'endpoint'}:
+                    result=push.test(payload['endpoint'])
+                else: raise VaultError(400,'Ungültige Push-Anfrage')
+                self.json_response(200,result);return
+            if not isinstance(payload, dict) or set(payload) not in ({'envelope'},{'envelope','reminderTimes'}):
+                raise VaultError(400, 'Nur verschlüsselte Daten und Erinnerungstermine erlaubt')
             if method == 'POST':
-                result = vault.create(payload['envelope'], token, self.headers.get('X-Setup-Token', ''))
+                result = vault.create(payload['envelope'], token, self.headers.get('X-Setup-Token', ''), payload.get('reminderTimes'))
                 self.json_response(201, result)
             else:
-                result = vault.write(payload['envelope'], token, self.headers.get('If-Match', '').strip('"'))
+                result = vault.write(payload['envelope'], token, self.headers.get('If-Match', '').strip('"'), payload.get('reminderTimes'))
                 self.json_response(200, result)
         except VaultError as error:
             self.json_response(error.status, {'error': str(error)})
@@ -114,6 +133,8 @@ def main():
         server_type = IPv6Server
     server = server_type((args.bind, args.port), functools.partial(Handler, directory=str(ROOT / 'dist')))
     server.vault = Vault(args.data_dir)
+    server.push = PushService(server.vault, args.push_enabled, args.push_subject)
+    server.push.start()
     host = f'[{args.bind}]' if ':' in args.bind else args.bind
     print(f'Klassenbuch läuft auf http://{host}:{server.server_port}', flush=True)
     try:
@@ -121,6 +142,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.push.stop()
         server.server_close()
 
 if __name__ == '__main__':

@@ -18,7 +18,13 @@ except FileExistsError:
     pass
 load_config([], environ={})  # Fail before touching the service if settings are invalid.
 PYENV
-python3 -m unittest discover -s tests -p 'test_*.py'
+# Install the Web Push transport in an isolated environment, never system Python.
+if [[ ! -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  python3 -m venv "$ROOT_DIR/.venv" || { echo 'Bitte python3-venv installieren und erneut ausführen.' >&2; exit 1; }
+fi
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+"$PYTHON_BIN" -m pip install --disable-pip-version-check -r requirements.txt
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_*.py'
 if command -v node >/dev/null; then node --check dist/app.js; node --check dist/records.js; node test.cjs; node tests/records.cjs; node tests/exports-reminders.cjs; fi
 SERVICE_USER="$(id -un)"
 SERVICE_GROUP="$(id -gn)"
@@ -34,7 +40,7 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$ROOT_DIR
-ExecStart=$(command -v python3) $ROOT_DIR/server.py --data-dir /var/lib/klassenbuch
+ExecStart=$PYTHON_BIN $ROOT_DIR/server.py --data-dir /var/lib/klassenbuch
 StateDirectory=klassenbuch
 StateDirectoryMode=0700
 ReadWritePaths=/var/lib/klassenbuch

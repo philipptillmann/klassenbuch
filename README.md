@@ -4,7 +4,7 @@ Lehrer-App für Klassen, Kurse, Schülerlisten, Stundenplan, Mitarbeit, Schulnot
 
 ## Installation und Update
 
-Voraussetzungen: Linux mit systemd, Python ab 3.9, Git, Bash, `flock` (util-linux), sudo-Rechte oder root. Node und Docker sind für den Betrieb nicht erforderlich. Port 8085 muss frei sein.
+Voraussetzungen: Linux mit systemd, Python ab 3.9 mit `venv`/pip, Git, Bash, `flock` (util-linux), sudo-Rechte oder root. Node und Docker sind für den Betrieb nicht erforderlich. Port 8085 muss frei sein. Der Installer richtet `.venv` ein und installiert die Web-Push-Abhängigkeiten aus `requirements.txt`; beim ersten Update wird dafür Internetzugang benötigt (unter Debian/Ubuntu ggf. `sudo apt install python3-venv`).
 
 ```bash
 git clone --branch Server --single-branch https://github.com/philipptillmann/klassenbuch.git ~/klassenbuch
@@ -71,7 +71,7 @@ sudo systemctl stop klassenbuch
 Ohne systemd im Vordergrund:
 
 ```bash
-python3 server.py --bind 127.0.0.1 --port 8085 --data-dir /pfad/zum/klassenbuch-speicher
+.venv/bin/python server.py --bind 127.0.0.1 --port 8085 --data-dir /pfad/zum/klassenbuch-speicher
 ```
 
 Ohne `--data-dir` verwendet der manuelle Start `KLASSENBUCH_DATA_DIR`, andernfalls `~/.local/share/klassenbuch`. Dort liegt auch der einmalige `setup-token`. Die UI nennt standardmäßig den systemd-Pfad. Der Datenpfad muss dauerhaft beschreibbar sein.
@@ -80,7 +80,7 @@ Ohne `--data-dir` verwendet der manuelle Start `KLASSENBUCH_DATA_DIR`, andernfal
 
 ## Daten und Verschlüsselung
 
-**Der Server speichert nur den verschlüsselten Datenbestand in `/var/lib/klassenbuch/vault.sqlite3`.** Klassen, Namen, Kommentare, Fehlzeiten und Noten werden vor dem Upload im Browser gemeinsam per AES-256-GCM verschlüsselt. Passwort und Entschlüsselungsschlüssel verlassen den Browser nicht und werden dort nur im Arbeitsspeicher gehalten. Nach fünf Minuten ohne Eingabe sperrt sich die App.
+**Der eigentliche Klassenbuch-Datenbestand bleibt verschlüsselt in `/var/lib/klassenbuch/vault.sqlite3`.** Zusätzlich sind nach der Freigabe zu #16 reine Erinnerungstermine und gerätespezifische Push-Abonnements für den Server lesbar; sie enthalten keine Namen oder Kursinhalte. Klassen, Namen, Kommentare, Fehlzeiten und Noten werden vor dem Upload im Browser gemeinsam per AES-256-GCM verschlüsselt. Passwort und Entschlüsselungsschlüssel verlassen den Browser nicht und werden dort nur im Arbeitsspeicher gehalten. Nach fünf Minuten ohne Eingabe sperrt sich die App.
 
 Das portable Datenformat bleibt `v:1` mit Salt, IV und Ciphertext. Schlüsselableitung: PBKDF2-HMAC-SHA-256 mit 600.000 Iterationen und zufälligem 16-Byte-Salt. Jede Speicherung verwendet einen neuen zufälligen 12-Byte-IV und einen 128-Bit-Authentifizierungstag. Zufallswerte kommen aus `crypto.getRandomValues`. Alte Backups bleiben lesbar.
 
@@ -94,7 +94,7 @@ Ohne Passwort gibt es keine Wiederherstellung. Ein kompromittierter Server könn
 
 Unter **Datenschutz → Verschlüsseltes Backup** wird der aktuelle verschlüsselte Serverbestand als Datei exportiert. Die Datei benötigt das Passwort, aber keinen Zugriffstoken. Beim Import in ein bereits entsperrtes Server-Klassenbuch wird der Inhalt mit dessen bestehendem Schlüssel neu verschlüsselt; das Serverpasswort ändert sich nicht. Beim Import in eine leere Installation wird das Backup-Passwort zum Serverpasswort.
 
-Regelmäßig Backups exportieren und zusätzlich das Server-Datenverzeichnis sichern. Für eine konsistente Dateisicherung entweder den Dienst während der Kopie stoppen oder die SQLite-Backup-Funktion verwenden. Ein Systembackup muss Datenbank und gegebenenfalls noch vorhandenen Einrichtungsschlüssel enthalten. Niemals eine Datenbank ins Git-Repository legen.
+Regelmäßig Backups exportieren und zusätzlich das Server-Datenverzeichnis sichern. Für eine konsistente Dateisicherung entweder den Dienst während der Kopie stoppen oder die SQLite-Backup-Funktion verwenden. Ein Systembackup muss Datenbank, `vapid-private.pem` und gegebenenfalls noch vorhandenen Einrichtungsschlüssel enthalten. Der VAPID-Schlüssel ist nur der Versandschlüssel für Push, kein Entschlüsselungsschlüssel für Klassenbuchdaten. Geht er verloren, müssen die Geräte für Push neu angemeldet werden. Niemals eine Datenbank ins Git-Repository legen.
 
 ## Funktionen
 
@@ -114,7 +114,7 @@ Ein Datenbestand enthält ein Schuljahr. Die Schuljahrbezeichnung archiviert ode
 
 Das Buchlogo ist als `logo.svg` (Oberfläche/Favicon) sowie als PNG in 192×192 und 512×512 verfügbar. Eine separate maskierbare 512×512-Version hat einen durchgehenden Hintergrund und hält das Buchmotiv im sicheren Bereich; für iOS ist ein 180×180-Apple-Touch-Icon enthalten. `manifest.webmanifest` verknüpft Name, Farben, Startadresse und Symbole für die Installation über das Browsermenü („App installieren“/„Zum Home-Bildschirm“).
 
-Die App verwendet dabei denselben HTTPS-Server und Passwortschutz. Es werden keine entschlüsselten Daten für Offline-Nutzung gecacht. Eine Installation allein aktiviert keinen Push bei geschlossener App; die Einschränkung aus Issue #16 bleibt bestehen. Die Icons lassen sich bei Bedarf mit `node scripts/generate-icons.cjs` aus dem SVG neu erzeugen (nur dafür Playwright/Chromium nötig).
+Die App verwendet dabei denselben HTTPS-Server und Passwortschutz. Es werden keine entschlüsselten Daten für Offline-Nutzung gecacht. Eine PWA-Installation allein aktiviert keine Erinnerungen; jedes Gerät wird unter „Erinnerungen“ für Hintergrund-Push angemeldet. Die Icons lassen sich bei Bedarf mit `node scripts/generate-icons.cjs` aus dem SVG neu erzeugen (nur dafür Playwright/Chromium nötig).
 
 ## CSV-Export
 
@@ -124,13 +124,40 @@ Die Datei verwendet UTF-8 mit BOM, Semikolon als Trennzeichen sowie korrekt mask
 
 Doppelte Bewertungssymbole werden als **+ +** und **− −** angezeigt (Karten, Auswahlfelder, Stundenverlauf, Bilanz und CSV). Die numerischen Werte und vorhandenen Daten ändern sich dadurch nicht.
 
-## Erinnerungen (erste Umsetzung von Issue #16)
+## Erinnerungen und Hintergrund-Web-Push (#16)
 
-Unter **Erinnerungen** kann auf diesem Gerät die Browser-Berechtigung angefordert und eine Testnachricht angezeigt werden. Zur Auswahl stehen 0, 5, 10 oder 15 Minuten nach Stundenende oder eine tägliche Uhrzeit an Tagen mit Unterricht. Das Ende wird aus Beginn + Dauer im Stundenplan ermittelt; neue Einträge bieten eine Dauer-Eingabe, vorhandene Einträge werden mit 45 Minuten behandelt. Zeitberechnung erfolgt in der lokalen Zeitzone des jeweiligen Geräts.
+### Aktivieren
 
-Die Einstellungen werden mit dem Datenbestand verschlüsselt gespeichert. Die Berechtigung muss pro Gerät erteilt werden. Nachrichten enthalten keine Namen oder Kursdaten. Der Zeitplaner läuft nur in der geöffneten, entsperrten App; nach der Sperre wird er gestoppt. Hintergrund-Tabs können vom Browser verzögert werden. Bis zu fünf Minuten verspätete Erinnerungen werden nachgeholt, ältere verworfen. Gleichzeitige Termine werden gebündelt, doppelte Nachrichten während derselben entsperrten Sitzung vermieden. Ohne Stundenplantermine oder bei deaktivierten/blockierten Benachrichtigungen gibt es keine Nachrichten.
+1. Nach `~/klassenbuch/update.sh` die HTTPS-App neu laden und entsperren.
+2. Unter **Erinnerungen** Browser-Benachrichtigungen erlauben und **Hintergrund-Push aktivieren** wählen. Das ist eine Anmeldung nur für dieses Gerät.
+3. Erinnerungen einschalten und entweder 0/5/10/15 Minuten nach Stundenende oder eine tägliche Uhrzeit an Unterrichtstagen speichern.
+4. Mit **Hintergrund-Push testen** eine Nachricht über den echten Push-Dienst anfordern. „Angenommen“ bestätigt die Annahme durch den Dienst, nicht die sofortige Anzeige auf dem Gerät.
 
-**Push bei geschlossener oder gesperrter App ist noch offen.** Der Service Worker zeigt ausschließlich vom geöffneten Fenster ausgelöste Nachrichten an und verarbeitet Klicks; er enthält weder Schlüssel noch Stundenplan und ist kein Hintergrund-Zeitplaner. Der Server kann den verschlüsselten Stundenplan nicht auswerten. Für echte zeitgesteuerte Web-Push-Nachrichten müsste der Browser dem Server zusätzliche Erinnerungstermine (ohne Namen/Kursinhalte) und Push-Abonnements übermitteln oder eine andere Hintergrundlösung gewählt werden. Die dafür nötige Datenschutzentscheidung wird in Issue #16 dokumentiert; das Issue bleibt offen. Es werden bislang keine separaten Terminmetadaten oder Push-Abonnements an den Server übertragen.
+Das Ende einer Stunde ergibt sich aus Beginn + Dauer im Stundenplan (Altbestand: 45 Minuten). Ohne Termine oder bei ausgeschalteten Erinnerungen werden keine zeitgesteuerten Nachrichten geplant. Die Einstellungen bleiben Teil des verschlüsselten Klassenbuchs. Die Push-Berechtigung ist gerätespezifisch. **Dieses Gerät abmelden** entfernt das Abonnement und seine ausstehenden Jobs vom Server sowie aus dem Browser. Andere Geräte bleiben angemeldet. Erinnerungen global ausschalten und speichern leert den gemeinsamen Zeitplan für alle Geräte.
+
+### Technik und Datenschutz
+
+Am 21.10.2026 wurde ausdrücklich freigegeben, reine Erinnerungstermine und Push-Abonnements serverseitig zu speichern. Der Browser berechnet bis zu ein Jahr im Voraus UTC-Zeitstempel und sendet nur diese zusätzlich zum Ciphertext. Namen, Kursinhalte, Passwort und Entschlüsselungsschlüssel werden dabei nicht offengelegt. Aus den Zeitpunkten sind Unterrichtsmuster ableitbar. Die allgemeine Nachricht enthält weder Schüler- noch Kursdaten.
+
+Der Zeitplan wird beim Entsperren und bei jedem Speichern erneuert. Uhrzeiten richten sich nach der lokalen Zeitzone des Geräts, das den Plan zuletzt berechnet hat, einschließlich dessen Sommer-/Winterzeitregeln. Nach über einem Jahr ohne Öffnen läuft der vorausberechnete Plan aus. Der Server übernimmt keine vertraulichen Stundenplanregeln; alle Geräte erhalten den zuletzt freigegebenen Zeitplan.
+
+Änderungen am verschlüsselten Datenbestand und den zugehörigen Terminen werden in einer gemeinsamen SQLite-Transaktion mit Versionsprüfung gespeichert. Push-Anmeldung, Planaktualisierung und Abmeldung erfordern denselben authentifizierten Zugriff wie das Klassenbuch. Der Versand läuft im Serverprozess alle 15 Sekunden und braucht kein offenes oder entsperrtes App-Fenster. Die Warteschlange, Zustellzustände und Abonnements überstehen einen Neustart. Bei vorübergehenden Fehlern folgen begrenzte Wiederholungsversuche; über fünf Minuten alte Jobs werden verworfen. Push-Dienste erhalten eine TTL von fünf Minuten. HTTP 404/410 entfernt abgelaufene Abonnements. HTTPS-Endpunkte sind auf offizielle Browser-Push-Dienste begrenzt; HTTP-Weiterleitungen werden nicht verfolgt.
+
+VAPID-Schlüssel werden automatisch unter `/var/lib/klassenbuch/vapid-private.pem` erzeugt (0600). Sie sind von allen Datenschlüsseln getrennt und bleiben bei Updates erhalten. Nur der öffentliche VAPID-Schlüssel geht an den Browser. `pywebpush` verschlüsselt den Nachrichteninhalt für das jeweilige Abonnement und signiert den Versand. Zulässige optionale `.env`-Einstellungen:
+
+```dotenv
+KLASSENBUCH_PUSH_ENABLED=true
+# Öffentliche VAPID-Kontaktadresse; alternativ die eigene mailto: Adresse setzen.
+KLASSENBUCH_PUSH_SUBJECT=https://github.com/philipptillmann/klassenbuch
+```
+
+Nach Änderungen `sudo systemctl restart klassenbuch` ausführen. Bestehende `.env`-Dateien werden nicht ergänzt/überschrieben; die gezeigten Werte sind auch die Standardwerte. Bei `KLASSENBUCH_PUSH_ENABLED=false` stoppt der Serverversand. Die App kann weiterhin lokal erinnern, solange sie geöffnet und entsperrt ist. Der VAPID-Kontakt kann vom Push-Anbieter gelesen werden; dort keine geheimen Daten eintragen.
+
+### Gerätegrenzen
+
+Web Push benötigt HTTPS, einen unterstützten Browser und die Benachrichtigungsberechtigung des Betriebssystems. Auf iPhone/iPad (iOS/iPadOS ab 16.4) muss die App zum Home-Bildschirm hinzugefügt und von dort gestartet werden. Browser, Energiesparmodus, fehlende Verbindung und Betriebssystem können die Anzeige verzögern oder unterdrücken; es gibt keine garantierte Echtzeitzustellung. Der Server muss die HTTPS-Push-Dienste von Google, Mozilla, Apple bzw. Windows erreichen können. Eine vollständig vom Betriebssystem beendete/deaktivierte Browser-Komponente kann abhängig vom Gerät keine Nachrichten empfangen.
+
+Ohne Hintergrund-Anmeldung gibt es den bisherigen lokalen Zeitplaner als Fallback. Er läuft nur in einer geöffneten, entsperrten App und kann durch Hintergrund-Tab-Drosselung verzögert werden. Mit aktiver Hintergrund-Anmeldung wird dieser lokale Wecker auf dem Gerät unterdrückt, um doppelte Nachrichten zu vermeiden. Auch im Hintergrund hält der Service Worker **keinen Passwort-/Zugriffstoken und keinen Entschlüsselungsschlüssel**; beim Öffnen der gesperrten App muss weiterhin das Passwort eingegeben werden.
 
 ## Prüfungen
 
@@ -140,7 +167,7 @@ node --check dist/records.js
 node test.cjs
 node tests/records.cjs
 node tests/exports-reminders.cjs
-python3 -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests
 bash -n install.sh update.sh
 ```
 
@@ -149,6 +176,8 @@ Geprüft: Kryptografie, native/Fallback-Kompatibilität und getrennte Authentifi
 Optionale Browser-Durchläufe benötigen Playwright und Chromium (nicht für den Betrieb nötig). Sie starten selbst isolierte Testserver mit temporären Datenverzeichnissen:
 
 ```bash
+PYTHON_BIN=.venv/bin/python node tests/push-browser.cjs
+PYTHON_BIN=.venv/bin/python TEST_HTTPS=1 MOBILE=1 node tests/push-browser.cjs
 node tests/review-browser.cjs
 node tests/browser.cjs
 HTTP_FALLBACK=1 MOBILE=1 node tests/browser.cjs
@@ -159,7 +188,9 @@ TEST_HTTPS=1 node tests/storage-browser.cjs
 
 Der zusätzliche `review-browser`-Test prüft den CSV-Download mit einem echten CSV-Parser, getrennte Doppelzeichen, verschlüsselte Erinnerungseinstellungen und die Service-Worker-Benachrichtigung.
 
-Der HTTPS-Test benötigt zusätzlich `openssl` und simuliert einen lokalen TLS-Reverse-Proxy. Geprüft werden Migration, ein unabhängiges zweites Gerät, falsche Passwörter, Schreibkonflikte, Netzwerkausfälle, Backups mit anderem Passwort und ausschließlich verschlüsselte Speicherung. `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` passen Chromium-Datei bzw. Playwright-Modul an.
+Der HTTPS-Test benötigt zusätzlich `openssl` und simuliert einen lokalen TLS-Reverse-Proxy. Geprüft werden Migration, ein unabhängiges zweites Gerät, falsche Passwörter, Schreibkonflikte, Netzwerkausfälle, Backups mit anderem Passwort und ausschließlich verschlüsselte Speicherung. `CHROMIUM_PATH` und `PLAYWRIGHT_MODULE` passen Chromium-Datei bzw. Playwright-Modul an. `PYTHON_BIN` wählt das Python des Testservers; für Hintergrund-Push `.venv/bin/python` verwenden.
+
+Der Push-Test nutzt ein synthetisches Provider-Abonnement und liefert ein echtes Browser-Push-Ereignis über Chromiums Testprotokoll aus, auch bei gesperrter und geschlossener App. Die Python-Tests prüfen separat die echte pywebpush-Nachrichtenverschlüsselung, Entschlüsselung durch den Empfänger und VAPID-Signatur, außerdem Retry/Neustart/Abmeldung und Metadaten-Zugriffsschutz. Eine Live-Zustellung über ein reales Benutzer-Abonnement bzw. ein physisches iPhone wird damit nicht behauptet; dafür dient „Hintergrund-Push testen“ nach dem Update.
 
 ## Feature Requests
 

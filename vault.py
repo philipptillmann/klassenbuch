@@ -45,6 +45,8 @@ class Vault:
         self.setup_path = self.directory / 'setup-token'
         with self.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS vault (id INTEGER PRIMARY KEY CHECK(id=1), envelope TEXT NOT NULL, verifier TEXT NOT NULL, revision INTEGER NOT NULL)')
+        from push_service import init_tables
+        with self.connect() as db: init_tables(db)
         os.chmod(self.path, 0o600)
         if not self.status()['exists']:
             try:
@@ -74,7 +76,7 @@ class Vault:
             raise VaultError(401, 'Zugriff verweigert')
         return {'envelope': json.loads(row[0]), 'revision': row[2]}
 
-    def create(self, envelope, token, setup):
+    def create(self, envelope, token, setup, reminder_times=None):
         validate_envelope(envelope)
         verifier = token_hash(token)
         with self.connect() as db:
@@ -88,10 +90,12 @@ class Vault:
             if not isinstance(setup, str) or not setup.isascii() or not hmac.compare_digest(expected, setup):
                 raise VaultError(403, 'Einrichtungsschlüssel prüfen')
             db.execute('INSERT INTO vault VALUES (1, ?, ?, 1)', (json.dumps(envelope), verifier))
+            from push_service import replace_plan
+            replace_plan(db, [] if reminder_times is None else reminder_times, 1)
         self.setup_path.unlink(missing_ok=True)
         return {'revision': 1}
 
-    def write(self, envelope, token, revision):
+    def write(self, envelope, token, revision, reminder_times=None):
         validate_envelope(envelope)
         verifier = token_hash(token)
         with self.connect() as db:
@@ -104,4 +108,6 @@ class Vault:
             if envelope['salt'] != json.loads(row[0])['salt']:
                 raise VaultError(400, 'Der Schlüssel darf beim Speichern nicht geändert werden')
             db.execute('UPDATE vault SET envelope=?, revision=revision+1 WHERE id=1', (json.dumps(envelope),))
+            from push_service import replace_plan
+            replace_plan(db, [] if reminder_times is None else reminder_times, row[2]+1)
         return {'revision': row[2] + 1}

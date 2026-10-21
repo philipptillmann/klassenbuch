@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 exports.startServer = async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'klassenbuch-qa-'));
-  const process = spawn('python3', [path.join(__dirname,'../server.py'),'--bind','127.0.0.1','--port','0','--data-dir',directory], {stdio:['ignore','pipe','pipe']});
+  const process = spawn(global.process.env.PYTHON_BIN || 'python3', [path.join(__dirname,'../server.py'),'--bind','127.0.0.1','--port','0','--data-dir',directory], {stdio:['ignore','pipe','pipe']});
   let logs = '';
   process.stderr.on('data', chunk => logs += chunk);
   let url = await new Promise((resolve,reject) => {
