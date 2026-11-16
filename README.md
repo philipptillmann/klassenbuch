@@ -2,7 +2,79 @@
 
 Lehrer-App für Klassen, Kurse, Schülerlisten, Stundenplan, Mitarbeit, Schulnoten und Fehlzeiten. Der Branch **Server** enthält die installierbare Version.
 
-## Installation und Update
+## Docker (empfohlen)
+
+Voraussetzungen: Linux, Git, Bash, `flock`, Docker Engine mit Compose Plugin (Compose ab 2.20) und Zugriff auf den Docker-Daemon. Python, pip und venv werden auf dem Host nicht benötigt. Docker muss beim Booten starten. Bei Rootless Docker müssen UID-Mapping und Bind-Mount-Rechte separat eingerichtet werden; das Installationsskript ist für reguläres Docker auf dem Host vorgesehen.
+
+### Bestehende systemd-Installation umstellen
+
+Als bisheriger Installationsbenutzer ausführen, damit die Dateirechte zum vorhandenen Datenverzeichnis passen:
+
+```bash
+cd ~/klassenbuch
+git pull --ff-only origin Server
+bash ./install-docker.sh --migrate-systemd
+```
+
+Das Skript baut zuerst das Image, stoppt dann den bisherigen Dienst und erstellt eine konsistente Sicherung unter `/var/lib/klassenbuch-backup-<Zeitstempel>-<Prozess-ID>`. Der Container verwendet anschließend **dasselbe `/var/lib/klassenbuch`**. Passwort, verschlüsselte Daten, Einrichtungsschlüssel (falls vorhanden) und VAPID-Schlüssel bleiben erhalten. Erst wenn der Container gesund ist, wird der alte systemd-Dienst für den Autostart deaktiviert. Bei fehlgeschlagenem Containerstart wird der Container entfernt und der bisherige Dienst wieder gestartet. Nach der Umstellung niemals beide Varianten gleichzeitig starten.
+
+Die vorhandene `.env` bleibt erhalten, einschließlich z. B. `KLASSENBUCH_PORT=18085`. Der HTTPS-Reverse-Proxy auf demselben Host benötigt keine Änderung.
+
+### Neue Installation
+
+```bash
+git clone --branch Server --single-branch https://github.com/philipptillmann/klassenbuch.git ~/klassenbuch
+bash ~/klassenbuch/install-docker.sh
+sudo cat /var/lib/klassenbuch/setup-token
+```
+
+Die HTTPS-Adresse öffnen und den Einrichtungsschlüssel sowie ein neues Passwort eingeben. Standardmäßig ist der veröffentlichte Port `127.0.0.1:8085`. Für direkten Zugriff aus dem LAN `KLASSENBUCH_BIND=0.0.0.0` setzen; für den Browser bleibt HTTPS außerhalb von localhost erforderlich.
+
+### Updates und Betrieb
+
+```bash
+~/klassenbuch/update.sh
+
+cd ~/klassenbuch
+docker compose ps
+docker compose logs --tail 50
+docker compose stop
+# Nach Stop oder Änderungen an .env:
+docker compose up -d --wait
+```
+
+Das Installationsskript hinterlegt die lokale Datei `.deployment-docker`; dadurch baut `update.sh` künftig das Image neu und erstellt den Container neu, ohne die Daten zu ersetzen. Bestehende systemd-Installationen bleiben bis zum expliziten Umstieg beim bisherigen Updateweg. Für Docker-Updates ist kein Host-Python erforderlich.
+
+`.env` steuert die **Host-Bind-Adresse und den veröffentlichten Port**; intern hört der Container immer auf `0.0.0.0:8085`. Die Push-Einstellungen werden gezielt als Umgebungsvariablen übergeben. Die `.env` wird weder ins Image kopiert noch als Shellcode ausgeführt. Compose verarbeitet seine übliche Variableninterpolation; für literale Dollarzeichen die Compose-Regeln beachten. `KLASSENBUCH_UID` und `KLASSENBUCH_GID` werden beim ersten Docker-Installieren aus dem aktuellen Benutzer ergänzt. Sie müssen dem numerischen Eigentümer des Datenverzeichnisses entsprechen. Bei abweichendem Dienstbenutzer die Werte vor dem Umstieg entsprechend setzen; die Installation ändert vorhandene Dateieigentümer nicht.
+
+Das Image läuft ohne Root-Rechte, mit schreibgeschütztem Root-Dateisystem, ohne zusätzliche Linux-Capabilities und mit Healthcheck. Schreibbar sind das Datenverzeichnis und ein temporäres `/tmp`. Web Push benötigt ausgehendes HTTPS. Der Build-Kontext enthält nur die explizit erlaubten App-Dateien, keine `.env`, Datenbank, Backups oder Git-Historie.
+
+### Sicherung und Rückkehr zu systemd
+
+Für eine Dateisicherung den Container kurz stoppen:
+
+```bash
+cd ~/klassenbuch
+docker compose stop
+sudo cp -a /var/lib/klassenbuch "/var/lib/klassenbuch-backup-$(date +%Y%m%d-%H%M%S)"
+docker compose up -d --wait
+```
+
+`docker compose down` entfernt den Container, nicht das Bind-Mount-Datenverzeichnis. Daten niemals bei laufendem Container löschen oder durch Backups ersetzen. Auch Backups benötigen das alte Passwort zum Entschlüsseln.
+
+Zurück zur vorhandenen systemd-Installation (benötigt wieder Host-Python/venv):
+
+```bash
+cd ~/klassenbuch
+docker compose down
+bash ./install.sh
+# Erst nach erfolgreichem systemd-Start:
+rm .deployment-docker
+```
+
+Containerprüfung nach einem lokalen Build: `python3 tests/docker-smoke.py`. Sie verwendet ausschließlich ein temporäres benanntes Volume und einen temporären Container und prüft Einrichtung, Zugriffsschutz sowie Daten- und VAPID-Persistenz nach Neuerstellung.
+
+## Installation und Update ohne Docker (systemd)
 
 Voraussetzungen: Linux mit systemd, Python ab 3.9 mit `venv`/pip, Git, Bash, `flock` (util-linux), sudo-Rechte oder root. Node und Docker sind für den Betrieb nicht erforderlich. Port 8085 muss frei sein. Der Installer richtet `.venv` ein und installiert die Web-Push-Abhängigkeiten aus `requirements.txt`; beim ersten Update wird dafür Internetzugang benötigt (unter Debian/Ubuntu ggf. `sudo apt install python3-venv`).
 

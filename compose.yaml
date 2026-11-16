@@ -1,0 +1,27 @@
+name: klassenbuch
+services:
+  klassenbuch:
+    build: .
+    image: klassenbuch:local
+    restart: unless-stopped
+    init: true
+    user: "${KLASSENBUCH_UID:-1000}:${KLASSENBUCH_GID:-1000}"
+    ports:
+      - "${KLASSENBUCH_BIND:-127.0.0.1}:${KLASSENBUCH_PORT:-8085}:8085"
+    environment:
+      KLASSENBUCH_PUSH_ENABLED: "${KLASSENBUCH_PUSH_ENABLED:-true}"
+      KLASSENBUCH_PUSH_SUBJECT: "${KLASSENBUCH_PUSH_SUBJECT:-https://github.com/philipptillmann/klassenbuch}"
+    volumes:
+      - type: bind
+        source: /var/lib/klassenbuch
+        target: /var/lib/klassenbuch
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s

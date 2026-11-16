@@ -12,3 +12,5 @@ setup-token
 
 .venv/
 vapid-private.pem
+
+.deployment-docker

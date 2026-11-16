@@ -10,4 +10,7 @@ flock -n 9 || { echo 'Ein Update läuft bereits.' >&2; exit 1; }
 git fetch origin Server
 git merge --ff-only FETCH_HEAD
 # Interpret scripts explicitly so installation also works from an unpacked archive.
+if [[ -f "$ROOT_DIR/.deployment-docker" ]]; then
+  exec bash "$ROOT_DIR/install-docker.sh"
+fi
 exec bash "$ROOT_DIR/install.sh"
